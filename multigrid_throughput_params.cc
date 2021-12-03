@@ -52,11 +52,11 @@
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools.h>
 
-#include "cell_weights.h"
-#include "grid_generator.h"
-#include "mg_tools.h"
-#include "operator.h"
-#include "scoped_timer.h"
+#include "include/cell_weights.h"
+#include "include/grid_generator.h"
+#include "include/mg_tools.h"
+#include "include/operator.h"
+#include "include/scoped_timer.h"
 
 using namespace dealii;
 
