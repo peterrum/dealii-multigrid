@@ -1794,7 +1794,6 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy;
 
-  bool preserve_fine_triangulation    = true;
   bool repartition_fine_triangulation = true;
 
   parallel::fullydistributed::Triangulation<dim> triangulations_pft(
@@ -1875,10 +1874,15 @@ run(const RunParameters &params, ConvergenceTable &table)
         }
       else if (is_prefix(policy_name, "CellWeightPolicy"))
         {
+          const auto weight_function = parallel::hanging_nodes_weighting<dim>(
+            atof(get_parameters(policy_name)[1].c_str()));
+
           policy =
-            std::make_unique<RepartitioningPolicyTools::CellWeightPolicy<dim>>(
-              parallel::hanging_nodes_weighting<dim>(
-                atof(get_parameters(policy_name)[1].c_str())));
+            std::make_unique<RepartitioningPolicyTools::DefaultPolicy<dim>>(
+              true);
+
+          tria.signals.cell_weight.connect(weight_function);
+          tria.repartition();
         }
       else if (is_prefix(policy_name, "FirstChildPolicy"))
         {
@@ -1892,6 +1896,10 @@ run(const RunParameters &params, ConvergenceTable &table)
         }
     }
 
+  monitor("run::3");
+
+  std::vector<std::shared_ptr<const Triangulation<dim>>> triangulations;
+
   if (type == "HPMG-local")
     {
       const auto partitions = policy->partition(tria);
@@ -1901,22 +1909,29 @@ run(const RunParameters &params, ConvergenceTable &table)
           tria,
           partitions,
           TriangulationDescription::Settings::construct_multigrid_hierarchy);
-      triangulations_pft.create_triangulation(description);
+
+      const auto new_triangulation =
+        std::make_shared<parallel::fullydistributed::Triangulation<dim>>(
+          tria.get_communicator());
+      new_triangulation->create_triangulation(description);
+
+      triangulations.emplace_back(new_triangulation);
+    }
+  else if (type == "HMG-local" || type == "AMG" || type == "AMGPETSc")
+    {
+      triangulations.emplace_back(&tria, [](auto *) {});
+    }
+  else
+    {
+      triangulations =
+        MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
+          tria,
+          *policy,
+          false /*=preserve_fine_triangulation*/,
+          repartition_fine_triangulation);
     }
 
-  monitor("run::3");
-
-  auto triangulations =
-    (type == "HMG-local" || type == "HPMG-local" || type == "AMG" ||
-     type == "AMGPETSc") ?
-      std::vector<std::shared_ptr<const Triangulation<dim>>>() :
-      MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
-        tria,
-        *policy,
-        preserve_fine_triangulation,
-        repartition_fine_triangulation);
-
-  if (triangulations.size() > 0)
+  if (triangulations.size() > 1)
     {
       // collect levels
       std::vector<std::shared_ptr<const Triangulation<dim>>> temp;
@@ -1951,12 +1966,7 @@ run(const RunParameters &params, ConvergenceTable &table)
       triangulations = temp;
     }
 
-  DoFHandler<dim> dof_handler(tria);
-  if (type == "PMG" || type == "HMG-global" || type == "HPMG")
-    dof_handler.reinit(*triangulations.back());
-  else if (type == "HPMG-local")
-    dof_handler.reinit(triangulations_pft);
-
+  DoFHandler<dim> dof_handler(*triangulations.back());
 
   AffineConstraints<Number>           constraint;
   Operator<dim, n_components, Number> op;
