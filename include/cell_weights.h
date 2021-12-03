@@ -8,9 +8,6 @@ namespace dealii::parallel
   hanging_nodes_weighting(const double weight)
   {
     return [weight](const auto &cell, const auto &) -> unsigned int {
-      if (cell->is_locally_owned() == false)
-        return 0;
-
       bool flag = false;
 
       for (const auto f : cell->face_indices())
