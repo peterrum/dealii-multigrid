@@ -1,0 +1,13 @@
+{
+  "Type" : "HPMG",
+  "GeometryType" : "annulus",
+  "NRefGlobal" : "7",
+  "NRefLocal" : "0",
+  "Degree" : "3",
+  "Paraview" : false,
+  "Verbosity" : true,
+  "PartitionerName" : "FirstChildPolicy-2.0",
+  "MinLevel" : "0",
+  "CoarseGridSolverType" : "amg"
+}
+

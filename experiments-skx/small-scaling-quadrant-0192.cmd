@@ -2,15 +2,15 @@
 # Job Name and Files (also --job-name)
 #SBATCH -J LIKWID
 #Output and error (also --output, --error):
-#SBATCH -o cores-0192.out
-#SBATCH -e cores-0192.e
+#SBATCH -o quadrant-0192.out
+#SBATCH -e quadrant-0192.e
 #Initial working directory (also --chdir):
 #SBATCH -D ./
 #Notification and type
 #SBATCH --mail-type=END
 #SBATCH --mail-user=munch@lnm.mw.tum.de
 # Wall clock limit:
-#SBATCH --time=0:30:00
+#SBATCH --time=1:00:00
 #SBATCH --no-requeue
 #Setup of execution environment
 #SBATCH --export=NONE
@@ -18,7 +18,7 @@
 #SBATCH --account=pr83te
 #
 ## #SBATCH --switches=4@24:00:00
-#SBATCH --partition=test
+#SBATCH --partition=micro
 #Number of nodes and MPI tasks per node:
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=48
@@ -45,6 +45,6 @@ module load intel-mpi/2019-gcc
 
 pwd
 
-array=($(ls multigrid_throughput_simple_scaling_*.json));
+array=($(ls input_*.json));
 mpirun -np 192 ../multigrid_throughput_params "${array[@]}"
 

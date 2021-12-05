@@ -2,15 +2,15 @@
 # Job Name and Files (also --job-name)
 #SBATCH -J LIKWID
 #Output and error (also --output, --error):
-#SBATCH -o annulus-0192.out
-#SBATCH -e annulus-0192.e
+#SBATCH -o data.out
+#SBATCH -e data.e
 #Initial working directory (also --chdir):
 #SBATCH -D ./
 #Notification and type
 #SBATCH --mail-type=END
 #SBATCH --mail-user=munch@lnm.mw.tum.de
 # Wall clock limit:
-#SBATCH --time=1:00:00
+#SBATCH --time=0:30:00
 #SBATCH --no-requeue
 #Setup of execution environment
 #SBATCH --export=NONE
@@ -18,9 +18,9 @@
 #SBATCH --account=pr83te
 #
 ## #SBATCH --switches=4@24:00:00
-#SBATCH --partition=micro
+#SBATCH --partition=test
 #Number of nodes and MPI tasks per node:
-#SBATCH --nodes=4
+#SBATCH --nodes=16
 #SBATCH --ntasks-per-node=48
 #SBATCH --cpus-per-task=1
 
@@ -46,5 +46,6 @@ module load intel-mpi/2019-gcc
 pwd
 
 array=($(ls input_*.json));
-mpirun -np 192 ../multigrid_throughput_params "${array[@]}"
+mpirun -np 768 ../multigrid_throughput_params "${array[@]}"
+
 

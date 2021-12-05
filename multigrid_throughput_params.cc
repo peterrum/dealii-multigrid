@@ -1876,16 +1876,23 @@ run(const RunParameters &params, ConvergenceTable &table)
         {
           const auto weight_function = parallel::hanging_nodes_weighting<dim>(
             atof(get_parameters(policy_name)[1].c_str()));
+          tria.signals.cell_weight.connect(weight_function);
+          tria.repartition();
 
           policy =
             std::make_unique<RepartitioningPolicyTools::DefaultPolicy<dim>>(
               true);
-
-          tria.signals.cell_weight.connect(weight_function);
-          tria.repartition();
         }
       else if (is_prefix(policy_name, "FirstChildPolicy"))
         {
+          if(get_parameters(policy_name).size() > 1)
+            {
+              const auto weight_function = parallel::hanging_nodes_weighting<dim>(
+                atof(get_parameters(policy_name)[1].c_str()));
+              tria.signals.cell_weight.connect(weight_function);
+              tria.repartition();
+            }
+          
           policy =
             std::make_unique<RepartitioningPolicyTools::FirstChildPolicy<dim>>(
               tria);

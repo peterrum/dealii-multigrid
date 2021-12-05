@@ -1,0 +1,13 @@
+{
+  "Type" : "HPMG",
+  "GeometryType" : "quadrant",
+  "NRefGlobal" : "7",
+  "NRefLocal" : "0",
+  "Degree" : "3",
+  "Paraview" : false,
+  "Verbosity" : true,
+  "Partitioner" : "0",
+  "MinLevel" : "0",
+  "CoarseGridSolverType" : "amg"
+}
+
