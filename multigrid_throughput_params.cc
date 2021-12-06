@@ -84,6 +84,8 @@ namespace dealii::parallel
     {
       if (dim == 3)
         {
+          this->line_to_cells.clear();
+          
           const unsigned int n_raw_lines = triangulation.n_raw_lines();
           this->line_to_cells.resize(n_raw_lines);
 
@@ -178,7 +180,7 @@ namespace dealii::parallel
         for (unsigned int f : cell->face_indices())
           if (!cell->at_boundary(f) &&
               (cell->level() > cell->neighbor(f)->level()))
-            return true;
+          return true;
 
       return false;
     }
@@ -2079,7 +2081,7 @@ run(const RunParameters &params, ConvergenceTable &table)
         else
           n_cells_wo_hn++;
       }
-
+  
   n_cells_w_hn  = Utilities::MPI::sum(n_cells_w_hn, MPI_COMM_WORLD);
   n_cells_wo_hn = Utilities::MPI::sum(n_cells_wo_hn, MPI_COMM_WORLD);
 
