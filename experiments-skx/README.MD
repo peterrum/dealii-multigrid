@@ -20,6 +20,15 @@ sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
 cd ..
 ```
 
+```bash
+mkdir small-scaling-hypercube
+cd small-scaling-hypercube
+python ../../dealii-multigrid/scripts/small-scaling-hypercube.py
+sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0001.cmd
+sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
+cd ..
+```
+
 ### Large scale
 
 ```
@@ -95,8 +104,8 @@ cd ..
 # Section 6
 
 ```
-mkdir large-scaling-quadrant
-cd large-scaling-quadrant
+mkdir large-scaling-quadrant-hp
+cd large-scaling-quadrant-hp
 python ../../dealii-multigrid/scripts/large_scaling.py --hpmg --quadrant
 python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
 sbatch node-0001.cmd

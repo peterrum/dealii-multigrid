@@ -57,7 +57,7 @@ def main():
         for k in ks:
             # local smoothing
             if options.hmg:
-                run_instance(counter, simulation, n_refinements, k, "HMG-local",  "DONTCARE", 0)
+                run_instance(counter, simulation, n_refinements, k, "HMG-local",  "DefaultPolicy", 0)
                 counter = counter + 1;
             else:
                 for policy in ["DefaultPolicy", "CellWeightPolicy-1.0", "CellWeightPolicy-1.5", "CellWeightPolicy-2.0", "CellWeightPolicy-2.5", "CellWeightPolicy-3.0", "FirstChildPolicy"]:

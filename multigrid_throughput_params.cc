@@ -1966,7 +1966,7 @@ run(const RunParameters &params, ConvergenceTable &table)
       
   dealii::parallel::Helper<dim> helper(tria);
 
-  if (type != "HMG-local" && type != "AMG" && type != "AMGPETSc")
+  if (type != "AMG" && type != "AMGPETSc")
     {
       if (policy_name == "")
         {
@@ -2089,7 +2089,7 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   std::vector<std::shared_ptr<const Triangulation<dim>>> triangulations;
 
-  if (type == "HPMG-local")
+  if (type == "HMG-local" || type == "HPMG-local")
     {
       const auto partitions = policy->partition(tria);
 
@@ -2106,7 +2106,7 @@ run(const RunParameters &params, ConvergenceTable &table)
 
       triangulations.emplace_back(new_triangulation);
     }
-  else if (type == "HMG-local" || type == "AMG" || type == "AMGPETSc")
+  else if (type == "AMG" || type == "AMGPETSc")
     {
       triangulations.emplace_back(&tria, [](auto *) {});
     }
