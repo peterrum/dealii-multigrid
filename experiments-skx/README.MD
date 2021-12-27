@@ -159,7 +159,7 @@ cd ..
 ```bash
 mkdir parameters-hp-amg
 cd parameters-hp-amg
-python ../../dealii-multigrid/scripts/parameters_hp_amg.py --hpmg --quadrant
+python ../../dealii-multigrid/scripts/parameters_hp_amg.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
 ```

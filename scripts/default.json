@@ -1,0 +1,17 @@
+{
+    "Type" : "HMG",
+    "GeometryType" : "quadrant",
+    "NRefGlobal" : "7",
+    "NRefLocal" : "0",
+    "Degree" : "3",
+    "Paraview" : false,
+    "Verbosity" : true,
+    "PartitionerName" : "CellWeightPolicy-2.0",
+    "MinLevel" : "0",
+    "MinNCells" : "0",
+    "CoarseGridSolverType" : "amg",
+    "SmootherDegree" : 3,
+    "CoarseSolverNCycles": 2,
+    "RelativeTolerance" : 1e-4,
+    "MGNumberType" : "float"
+  }  

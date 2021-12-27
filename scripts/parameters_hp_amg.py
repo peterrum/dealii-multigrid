@@ -1,16 +1,18 @@
+# Test p-multigrid (quadrant, degree=4) with different coarse-grid solvers.
+
 import json
 import os
 
 def run_instance(counter, t, n_refinements, min_level, coarse_grid_solver_type, n_cyles):
-    with open(os.path.dirname(os.path.abspath(__file__)) + "/parameters_hp_amg.json", 'r') as f:
+    with open(os.path.dirname(os.path.abspath(__file__)) + "/default.json", 'r') as f:
        datastore = json.load(f)
 
     # make modifications
-    datastore["NRefGlobal"]           = n_refinements
-    datastore["MinLevel"]             = min_level
-    datastore["Degree"]               = 4
     datastore["Type"]                 = t
-    datastore["SmootherDegree"]       = 3
+    datastore["GeometryType"]         = "quadrant"
+    datastore["NRefGlobal"]           = n_refinements
+    datastore["Degree"]               = 4
+    datastore["MinLevel"]             = min_level
     datastore["CoarseGridSolverType"] = coarse_grid_solver_type
     datastore["CoarseSolverNCycles"]  = n_cyles
 
@@ -22,18 +24,22 @@ def main():
     
     counter = 0;
 
-    for n_refinements in range(3,20):
+    for n_refinements in range(3,20): # number of refinements
 
+        # local smoothing
         run_instance(counter, "HPMG-local", n_refinements, 0, "amg", 1)
         counter = counter + 1;
 
+        # global coarsening
         run_instance(counter, "HPMG", n_refinements, 0, "amg", 1)
         counter = counter + 1;
 
+        # Trilinos ML with different number of repetitions
         for k in range(1, 5):
             run_instance(counter, "HPMG", n_refinements, n_refinements + 1, "amg", k)
             counter = counter + 1;
 
+        # PETSc BoomerAMG
         run_instance(counter, "HPMG", n_refinements, n_refinements + 1, "amg_petsc", 2)
         counter = counter + 1;
 
