@@ -1,3 +1,5 @@
+#include <deal.II/lac/sparsity_tools.h>
+
 #include <deal.II/matrix_free/fe_evaluation.h>
 #include <deal.II/matrix_free/matrix_free.h>
 #include <deal.II/matrix_free/operators.h>
@@ -226,6 +228,7 @@ public:
   void
   compute_inverse_diagonal(VectorType &diagonal) const
   {
+    matrix_free.initialize_dof_vector(diagonal);
     MatrixFreeTools::compute_diagonal(matrix_free,
                                       diagonal,
                                       &Operator::do_cell_integral_local,
