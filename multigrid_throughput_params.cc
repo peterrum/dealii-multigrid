@@ -67,25 +67,23 @@ namespace dealii::parallel
   public:
     Helper(Triangulation<dim, spacedim> &triangulation)
     {
-        reinit(triangulation);
-        
-        const auto fu = [&](){
-            this->reinit(triangulation);
-        };
-        
-        triangulation.signals.post_p4est_refinement.connect(fu);
-        triangulation.signals.post_distributed_refinement.connect(fu);
-        triangulation.signals.pre_distributed_repartition.connect(fu);
-        triangulation.signals.post_distributed_repartition.connect(fu);
+      reinit(triangulation);
+
+      const auto fu = [&]() { this->reinit(triangulation); };
+
+      triangulation.signals.post_p4est_refinement.connect(fu);
+      triangulation.signals.post_distributed_refinement.connect(fu);
+      triangulation.signals.pre_distributed_repartition.connect(fu);
+      triangulation.signals.post_distributed_repartition.connect(fu);
     }
-    
+
     void
     reinit(const Triangulation<dim, spacedim> &triangulation)
     {
       if (dim == 3)
         {
           this->line_to_cells.clear();
-          
+
           const unsigned int n_raw_lines = triangulation.n_raw_lines();
           this->line_to_cells.resize(n_raw_lines);
 
@@ -180,7 +178,7 @@ namespace dealii::parallel
         for (unsigned int f : cell->face_indices())
           if (!cell->at_boundary(f) &&
               (cell->level() > cell->neighbor(f)->level()))
-          return true;
+            return true;
 
       return false;
     }
@@ -207,15 +205,16 @@ namespace dealii::parallel
                 unsigned int>>>
       line_to_cells;
   };
-    
-  template <int dim, int spacedim=dim>
+
+  template <int dim, int spacedim = dim>
   std::function<
     unsigned int(const typename Triangulation<dim, spacedim>::cell_iterator &,
                  const typename Triangulation<dim, spacedim>::CellStatus)>
-  hanging_nodes_weighting(const Helper<dim, spacedim> &helper,const double                 weight)
+  hanging_nodes_weighting(const Helper<dim, spacedim> &helper,
+                          const double                 weight)
   {
     return [&helper, weight](const auto &cell, const auto &) -> unsigned int {
-      if (cell->is_locally_owned() == false)
+      if (cell->is_active() == false || cell->is_locally_owned() == false)
         return 10000;
 
       if (helper.is_constrained(cell))
@@ -1940,7 +1939,7 @@ run(const RunParameters &params, ConvergenceTable &table)
     Triangulation<dim>::MeshSmoothing::none,
     (type == "HMG-local" || type == "HPMG-local") ?
       parallel::distributed::Triangulation<dim>::construct_multigrid_hierarchy :
-      parallel::distributed::Triangulation<dim>::default_setting);
+      parallel::distributed::Triangulation<dim>::construct_multigrid_hierarchy);
 
   if (geometry_type == "quadrant_flexible")
     GridGenerator::create_quadrant_(tria, n_ref_global, n_ref_local);
@@ -1963,7 +1962,7 @@ run(const RunParameters &params, ConvergenceTable &table)
   std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy;
 
   bool repartition_fine_triangulation = true;
-      
+
   dealii::parallel::Helper<dim> helper(tria);
 
   if (type != "AMG" && type != "AMGPETSc")
@@ -2041,8 +2040,8 @@ run(const RunParameters &params, ConvergenceTable &table)
         }
       else if (is_prefix(policy_name, "CellWeightPolicy"))
         {
-          const auto weight_function = parallel::hanging_nodes_weighting<dim>(helper,
-            atof(get_parameters(policy_name)[1].c_str()));
+          const auto weight_function = parallel::hanging_nodes_weighting<dim>(
+            helper, atof(get_parameters(policy_name)[1].c_str()));
           tria.signals.cell_weight.connect(weight_function);
           tria.repartition();
 
@@ -2052,14 +2051,15 @@ run(const RunParameters &params, ConvergenceTable &table)
         }
       else if (is_prefix(policy_name, "FirstChildPolicy"))
         {
-          if(get_parameters(policy_name).size() > 1)
+          if (get_parameters(policy_name).size() > 1)
             {
-              const auto weight_function = parallel::hanging_nodes_weighting<dim>(helper,
-                atof(get_parameters(policy_name)[1].c_str()));
+              const auto weight_function =
+                parallel::hanging_nodes_weighting<dim>(
+                  helper, atof(get_parameters(policy_name)[1].c_str()));
               tria.signals.cell_weight.connect(weight_function);
               tria.repartition();
             }
-          
+
           policy =
             std::make_unique<RepartitioningPolicyTools::FirstChildPolicy<dim>>(
               tria);
@@ -2069,10 +2069,10 @@ run(const RunParameters &params, ConvergenceTable &table)
           AssertThrow(false, ExcNotImplemented());
         }
     }
-  
+
   types::global_cell_index n_cells_w_hn  = 0;
   types::global_cell_index n_cells_wo_hn = 0;
-  
+
   for (const auto &cell : tria.active_cell_iterators())
     if (cell->is_locally_owned())
       {
@@ -2081,7 +2081,7 @@ run(const RunParameters &params, ConvergenceTable &table)
         else
           n_cells_wo_hn++;
       }
-  
+
   n_cells_w_hn  = Utilities::MPI::sum(n_cells_w_hn, MPI_COMM_WORLD);
   n_cells_wo_hn = Utilities::MPI::sum(n_cells_wo_hn, MPI_COMM_WORLD);
 

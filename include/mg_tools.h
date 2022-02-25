@@ -174,8 +174,8 @@ namespace dealii::MGTools
         Utilities::MPI::ConsensusAlgorithms::Selector<
           std::pair<types::global_cell_index, types::global_cell_index>,
           unsigned int>
-          consensus_algorithm(process, communicator);
-        consensus_algorithm.run();
+          consensus_algorithm;
+        consensus_algorithm.run(process, communicator);
 
         for (unsigned i = 0; i < is_fine_required.n_elements(); ++i)
           if (is_fine_required_ranks[i] == my_rank)
