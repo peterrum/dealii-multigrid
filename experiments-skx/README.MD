@@ -24,8 +24,7 @@ cd ..
 mkdir small-scaling-hypercube
 cd small-scaling-hypercube
 python ../../dealii-multigrid/scripts/small-scaling-hypercube.py
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0001.cmd
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
+sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
 ```
 
