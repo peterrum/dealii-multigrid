@@ -1,14 +1,17 @@
+# Test h-multigrid (quadrant, degree=4) for different multigrid numbers.
+
 import json
 import os
 
 def run_instance(counter, n_refinements, k, solver, mg_number):
-    with open(os.path.dirname(os.path.abspath(__file__)) + "/parameters_mgnumber.json", 'r') as f:
+    # read default settings
+    with open(os.path.dirname(os.path.abspath(__file__)) + "/default.json", 'r') as f:
        datastore = json.load(f)
 
     # make modifications
-    datastore["NRefGlobal"]     = n_refinements
-    datastore["Degree"]         = k
-    datastore["Type"]           = solver
+    datastore["Type"]         = solver
+    datastore["NRefGlobal"]   = n_refinements
+    datastore["Degree"]       = k
     datastore["MGNumberType"] = mg_number
 
     # write data to output file
@@ -19,13 +22,12 @@ def main():
     
     counter = 0;
 
-    for n_refinements in range(3,20):
-        for tolerance in ["double", "float"]:
-            for k in [1, 4]:
-                for solver in ["HMG-local", "HMG-global"]:
+    for n_refinements in range(3,20):                      # number of refinements
+        for tolerance in ["double", "float"]:              # multigrid number
+            for k in [1, 4]:                               # degree
+                for solver in ["HMG-local", "HMG-global"]: # h-multigrid types
                     run_instance(counter, n_refinements, k, solver, tolerance)
                     counter = counter + 1;
-
 
 if __name__== "__main__":
   main()

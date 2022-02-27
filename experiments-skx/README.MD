@@ -77,25 +77,25 @@ cd ...
 ```bash
 mkdir small-scaling-gc-fcp-annulus
 cd small-scaling-gc-fcp-annulus
-python ../../dealii-multigrid/scripts/small-scaling-gc-fcp.py annulus
+python ../../dealii-multigrid/scripts/small-scaling.py annulus FirstChildPolicy-2.0
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0192.cmd
 cd ..
 
 mkdir small-scaling-gc-fcp-quadrant
 cd small-scaling-gc-fcp-quadrant
-python ../../dealii-multigrid/scripts/small-scaling-gc-fcp.py quadrant
+python ../../dealii-multigrid/scripts/small-scaling.py quadrant FirstChildPolicy-2.0
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
 cd ..
 
 mkdir small-scaling-gc-default-annulus
 cd small-scaling-gc-default-annulus
-python ../../dealii-multigrid/scripts/small-scaling-gc-default.py annulus
+python ../../dealii-multigrid/scripts/small-scaling.py annulus DefaultPolicy
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0192.cmd
 cd ..
 
 mkdir small-scaling-gc-default-quadrant
 cd small-scaling-gc-default-quadrant
-python ../../dealii-multigrid/scripts/small-scaling-gc-default.py quadrant
+python ../../dealii-multigrid/scripts/small-scaling.py quadrant DefaultPolicy
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
 cd ..
 ```
