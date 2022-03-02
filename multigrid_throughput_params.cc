@@ -1937,16 +1937,17 @@ solve_with_amg(const std::string &        type,
 
 struct RunParameters
 {
-  std::string  type           = "PMG";
-  std::string  geometry_type  = "quadrant_flexible";
-  unsigned int n_ref_global   = 6;
-  unsigned int n_ref_local    = 0;
-  unsigned int fe_degree_fine = 4;
-  bool         paraview       = false;
-  bool         verbose        = true;
-  unsigned int p              = 0;
-  std::string  policy_name    = "";
-  std::string  mg_number_tyep = "float";
+  std::string  type            = "PMG";
+  std::string  geometry_type   = "quadrant_flexible";
+  unsigned int n_ref_global    = 6;
+  unsigned int n_ref_local     = 0;
+  unsigned int fe_degree_fine  = 4;
+  bool         paraview        = false;
+  bool         verbose         = true;
+  unsigned int p               = 0;
+  std::string  policy_name     = "";
+  std::string  mg_number_tyep  = "float";
+  std::string  simulation_type = "Constant";
 
   int min_level   = -1;
   int min_n_cells = -1;
@@ -1973,6 +1974,7 @@ struct RunParameters
     prm.add_parameter("CoarseSolverNCycles", mg_data.coarse_solver.n_cycles);
     prm.add_parameter("RelativeTolerance", mg_data.cg_normal.reltol);
     prm.add_parameter("MGNumberType", mg_number_tyep);
+    prm.add_parameter("SimulationType", simulation_type);
 
     std::ifstream file;
     file.open(file_name);
@@ -1989,15 +1991,16 @@ template <int dim,
 void
 run(const RunParameters &params, ConvergenceTable &table)
 {
-  const std::string  type           = params.type;
-  const std::string  geometry_type  = params.geometry_type;
-  const unsigned int n_ref_global   = params.n_ref_global;
-  const unsigned int n_ref_local    = params.n_ref_local;
-  const unsigned int fe_degree_fine = params.fe_degree_fine;
-  const bool         paraview       = params.paraview;
-  const bool         verbose        = params.verbose;
-  const unsigned int p              = params.p;
-  std::string        policy_name    = params.policy_name;
+  const std::string  type            = params.type;
+  const std::string  geometry_type   = params.geometry_type;
+  const unsigned int n_ref_global    = params.n_ref_global;
+  const unsigned int n_ref_local     = params.n_ref_local;
+  const unsigned int fe_degree_fine  = params.fe_degree_fine;
+  const bool         paraview        = params.paraview;
+  const bool         verbose         = params.verbose;
+  const unsigned int p               = params.p;
+  std::string        policy_name     = params.policy_name;
+  const std::string  simulation_type = params.simulation_type;
 
   using VectorType = LinearAlgebra::distributed::Vector<Number>;
 
@@ -2248,19 +2251,23 @@ run(const RunParameters &params, ConvergenceTable &table)
   std::shared_ptr<Function<dim, Number>> dbc_func;
   std::shared_ptr<Function<dim, Number>> rhs_func;
 
-  if (false)
+  if (simulation_type == "Constant")
     {
       rhs_func = std::make_shared<Functions::ConstantFunction<dim, Number>>(
         1.0, n_components);
       dbc_func = std::make_shared<Functions::ZeroFunction<dim, Number>>(1.0);
     }
-  else
+  else if (simulation_type == "Gaussian")
     {
       const std::vector<Point<dim>> points = {Point<dim>(-0.5, -0.5, -0.5)};
       const double                  width  = 0.5;
 
       rhs_func = std::make_shared<GaussianRightHandSide<dim>>(points, width);
       dbc_func = std::make_shared<GaussianSolution<dim>>(points, width);
+    }
+  else
+    {
+      AssertThrow(false, ExcNotImplemented());
     }
 
   IndexSet locally_relevant_dofs;
