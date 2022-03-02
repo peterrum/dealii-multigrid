@@ -1091,8 +1091,9 @@ mg_solve(SolverControl &                              solver_control,
   if constexpr (!std::is_same<MGTransferTypeCoarse,
                               MGTransferGlobalCoarsening<
                                 dim,
-                                typename SystemMatrixType::VectorType>>::value)
-    mg_intermediate.set_edge_matrices(mg_interface, mg_interface);
+                                VectorType>>::value)
+    if(dof_fine.get_triangulation().has_hanging_nodes())                            
+      mg_intermediate.set_edge_matrices(mg_interface, mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeCoarse> preconditioner_mg(
     dof_intermediate, mg_intermediate, mg_transfer_intermediate);
@@ -1116,8 +1117,9 @@ mg_solve(SolverControl &                              solver_control,
   if constexpr (!std::is_same<MGTransferTypeFine,
                               MGTransferGlobalCoarsening<
                                 dim,
-                                typename SystemMatrixType::VectorType>>::value)
-    mg_fine.set_edge_matrices(mg_interface, mg_interface);
+                                VectorType>>::value)
+    if(dof_fine.get_triangulation().has_hanging_nodes())                            
+      mg_fine.set_edge_matrices(mg_interface, mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeFine> preconditioner(
     dof_fine, mg_fine, mg_transfer_fine);

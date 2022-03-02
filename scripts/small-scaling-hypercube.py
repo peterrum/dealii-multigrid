@@ -10,10 +10,11 @@ def run_instance(counter, n_refinements, k, solver):
        datastore = json.load(f)
 
     # make modifications
-    datastore["Type"]           = solver
-    datastore["GeometryType"]   = "hypercube"
-    datastore["NRefGlobal"]     = n_refinements
-    datastore["Degree"]         = k
+    datastore["Type"]            = solver
+    datastore["GeometryType"]    = "hypercube"
+    datastore["NRefGlobal"]      = n_refinements
+    datastore["Degree"]          = k
+    datastore["PartitionerName"] = "FirstChildPolicy-2.0"
 
     # write data to output file
     with open("./input_%s.json" % (str(counter).zfill(4)), 'w') as f:
