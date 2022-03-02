@@ -59,6 +59,75 @@
 
 using namespace dealii;
 
+template <int dim>
+class GaussianSolution : public dealii::Function<dim>
+{
+public:
+  GaussianSolution(const std::vector<Point<dim>> &source_centers,
+                   const double                   width)
+    : dealii::Function<dim>()
+    , source_centers(source_centers)
+    , width(width)
+  {}
+
+  double
+  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  {
+    double return_value = 0;
+
+    for (const auto &source_center : this->source_centers)
+      {
+        const dealii::Tensor<1, dim> x_minus_xi = p - source_center;
+        return_value +=
+          std::exp(-x_minus_xi.norm_square() / (this->width * this->width));
+      }
+
+    return return_value / dealii::Utilities::fixed_power<dim>(
+                            std::sqrt(2. * dealii::numbers::PI) * this->width);
+  }
+
+private:
+  const std::vector<Point<dim>> source_centers;
+  const double                  width;
+};
+
+template <int dim>
+class GaussianRightHandSide : public dealii::Function<dim>
+{
+public:
+  GaussianRightHandSide(const std::vector<Point<dim>> &source_centers,
+                        const double                   width)
+    : dealii::Function<dim>()
+    , source_centers(source_centers)
+    , width(width)
+  {}
+
+  double
+  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  {
+    double const coef         = 1.0;
+    double       return_value = 0;
+
+    for (const auto &source_center : this->source_centers)
+      {
+        const dealii::Tensor<1, dim> x_minus_xi = p - source_center;
+
+        return_value +=
+          ((2 * dim * coef -
+            4 * coef * x_minus_xi.norm_square() / (this->width * this->width)) /
+           (this->width * this->width) *
+           std::exp(-x_minus_xi.norm_square() / (this->width * this->width)));
+      }
+
+    return return_value / dealii::Utilities::fixed_power<dim>(
+                            std::sqrt(2 * dealii::numbers::PI) * this->width);
+  }
+
+private:
+  const std::vector<Point<dim>> source_centers;
+  const double                  width;
+};
+
 namespace dealii::parallel
 {
   template <int dim, int spacedim = dim>
@@ -2157,7 +2226,7 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   DoFHandler<dim> dof_handler(*triangulations.back());
 
-  AffineConstraints<Number>           constraint;
+  AffineConstraints<Number>           constraint, constraint_dbc;
   Operator<dim, n_components, Number> op;
 
   MappingQ1<dim> mapping;
@@ -2176,17 +2245,39 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   monitor("run::6");
 
+  std::shared_ptr<Function<dim, Number>> dbc_func;
+  std::shared_ptr<Function<dim, Number>> rhs_func;
+
+  if (false)
+    {
+      rhs_func = std::make_shared<Functions::ConstantFunction<dim, Number>>(
+        1.0, n_components);
+      dbc_func = std::make_shared<Functions::ZeroFunction<dim, Number>>(1.0);
+    }
+  else
+    {
+      const std::vector<Point<dim>> points = {Point<dim>(-0.5, -0.5, -0.5)};
+      const double                  width  = 0.5;
+
+      rhs_func = std::make_shared<GaussianRightHandSide<dim>>(points, width);
+      dbc_func = std::make_shared<GaussianSolution<dim>>(points, width);
+    }
+
   IndexSet locally_relevant_dofs;
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
+
   constraint.reinit(locally_relevant_dofs);
-  VectorTools::interpolate_boundary_values(mapping,
-                                           dof_handler,
-                                           0,
-                                           Functions::ZeroFunction<dim>(
-                                             n_components),
-                                           constraint);
+  VectorTools::interpolate_boundary_values(
+    mapping, dof_handler, 0, *dbc_func, constraint);
   DoFTools::make_hanging_node_constraints(dof_handler, constraint);
   constraint.close();
+
+
+  constraint_dbc.reinit(locally_relevant_dofs);
+  VectorTools::interpolate_boundary_values(
+    mapping, dof_handler, 0, *dbc_func, constraint_dbc);
+  DoFTools::make_hanging_node_constraints(dof_handler, constraint_dbc);
+  constraint_dbc.close();
 
   monitor("run::7");
 
@@ -2197,7 +2288,8 @@ run(const RunParameters &params, ConvergenceTable &table)
   VectorType solution, rhs;
   op.initialize_dof_vector(solution);
   op.initialize_dof_vector(rhs);
-  op.rhs(rhs);
+
+  op.rhs(rhs, rhs_func, mapping, dof_handler, quad);
 
   monitor("run::8");
 
@@ -2232,6 +2324,8 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   if (paraview == false)
     return;
+
+  constraint.distribute(solution);
 
   DataOutBase::VtkFlags flags;
   flags.write_higher_order_cells = true;
