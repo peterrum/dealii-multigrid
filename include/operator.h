@@ -58,8 +58,9 @@ public:
     this->constraints.copy_from(constraints);
 
     typename MatrixFree<dim, number>::AdditionalData data;
-    data.mapping_update_flags = update_gradients;
-    data.mg_level             = mg_level;
+    data.mapping_update_flags =
+      update_quadrature_points | update_gradients | update_values;
+    data.mg_level = mg_level;
 
     matrix_free.reinit(mapping, dof_handler, constraints, quad, data);
 
@@ -358,12 +359,17 @@ public:
 
 
   void
-  rhs(VectorType &b) const
+  rhs(VectorType &                          system_rhs,
+      const std::shared_ptr<Function<dim>> &rhs_func,
+      const Mapping<dim> &                  mapping,
+      const DoFHandler<dim> &               dof_handler,
+      const Quadrature<dim> &               quad) const
   {
     const int dummy = 0;
 
     matrix_free.template cell_loop<VectorType, int>(
-      [](const auto &matrix_free, auto &dst, const auto &, const auto cells) {
+      [&rhs_func](
+        const auto &matrix_free, auto &dst, const auto &, const auto cells) {
         FECellIntegrator phi(matrix_free, cells);
         for (unsigned int cell = cells.first; cell < cells.second; ++cell)
           {
@@ -371,11 +377,26 @@ public:
             for (unsigned int q = 0; q < phi.n_q_points; ++q)
               if constexpr (n_components == 1)
                 {
-                  phi.submit_value(1.0, q);
+                  VectorizedArray<number> coeff;
+
+                  const auto point_batch = phi.quadrature_point(q);
+
+                  for (unsigned int v = 0; v < VectorizedArray<number>::size();
+                       ++v)
+                    {
+                      Point<dim> single_point;
+                      for (unsigned int d = 0; d < dim; d++)
+                        single_point[d] = point_batch[d][v];
+                      coeff[v] = rhs_func->value(single_point);
+                    }
+
+                  phi.submit_value(coeff, q);
                 }
               else
                 {
                   Tensor<1, n_components> temp;
+
+                  Assert(false, ExcNotImplemented());
 
                   for (int i = 0; i < n_components; ++i)
                     temp[i] = 1.0;
@@ -386,9 +407,41 @@ public:
             phi.integrate_scatter(EvaluationFlags::values, dst);
           }
       },
-      b,
+      system_rhs,
       dummy,
       true);
+
+    AffineConstraints<number> constraints_without_dbc;
+    DoFTools::make_hanging_node_constraints(dof_handler,
+                                            constraints_without_dbc);
+    constraints_without_dbc.close();
+
+    VectorType b, x;
+
+    this->initialize_dof_vector(b);
+    this->initialize_dof_vector(x);
+
+
+    typename MatrixFree<dim, number>::AdditionalData data;
+    data.mapping_update_flags =
+      update_values | update_gradients | update_quadrature_points;
+
+    MatrixFree<dim, number> matrix_free;
+    matrix_free.reinit(
+      mapping, dof_handler, constraints_without_dbc, quad, data);
+
+    // set constrained
+    constraints.distribute(x);
+
+    // perform matrix-vector multiplication (with unconstrained system and
+    // constrained set in vector)
+    matrix_free.cell_loop(&Operator::do_cell_integral_range, this, b, x, true);
+
+    // clear constrained values
+    constraints.set_zero(b);
+
+    // move to the right-hand side
+    system_rhs -= b;
   }
 
 private:

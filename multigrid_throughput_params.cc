@@ -59,6 +59,75 @@
 
 using namespace dealii;
 
+template <int dim>
+class GaussianSolution : public dealii::Function<dim>
+{
+public:
+  GaussianSolution(const std::vector<Point<dim>> &source_centers,
+                   const double                   width)
+    : dealii::Function<dim>()
+    , source_centers(source_centers)
+    , width(width)
+  {}
+
+  double
+  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  {
+    double return_value = 0;
+
+    for (const auto &source_center : this->source_centers)
+      {
+        const dealii::Tensor<1, dim> x_minus_xi = p - source_center;
+        return_value +=
+          std::exp(-x_minus_xi.norm_square() / (this->width * this->width));
+      }
+
+    return return_value / dealii::Utilities::fixed_power<dim>(
+                            std::sqrt(2. * dealii::numbers::PI) * this->width);
+  }
+
+private:
+  const std::vector<Point<dim>> source_centers;
+  const double                  width;
+};
+
+template <int dim>
+class GaussianRightHandSide : public dealii::Function<dim>
+{
+public:
+  GaussianRightHandSide(const std::vector<Point<dim>> &source_centers,
+                        const double                   width)
+    : dealii::Function<dim>()
+    , source_centers(source_centers)
+    , width(width)
+  {}
+
+  double
+  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  {
+    double const coef         = 1.0;
+    double       return_value = 0;
+
+    for (const auto &source_center : this->source_centers)
+      {
+        const dealii::Tensor<1, dim> x_minus_xi = p - source_center;
+
+        return_value +=
+          ((2 * dim * coef -
+            4 * coef * x_minus_xi.norm_square() / (this->width * this->width)) /
+           (this->width * this->width) *
+           std::exp(-x_minus_xi.norm_square() / (this->width * this->width)));
+      }
+
+    return return_value / dealii::Utilities::fixed_power<dim>(
+                            std::sqrt(2 * dealii::numbers::PI) * this->width);
+  }
+
+private:
+  const std::vector<Point<dim>> source_centers;
+  const double                  width;
+};
+
 namespace dealii::parallel
 {
   template <int dim, int spacedim = dim>
@@ -1868,16 +1937,17 @@ solve_with_amg(const std::string &        type,
 
 struct RunParameters
 {
-  std::string  type           = "PMG";
-  std::string  geometry_type  = "quadrant_flexible";
-  unsigned int n_ref_global   = 6;
-  unsigned int n_ref_local    = 0;
-  unsigned int fe_degree_fine = 4;
-  bool         paraview       = false;
-  bool         verbose        = true;
-  unsigned int p              = 0;
-  std::string  policy_name    = "";
-  std::string  mg_number_tyep = "float";
+  std::string  type            = "PMG";
+  std::string  geometry_type   = "quadrant_flexible";
+  unsigned int n_ref_global    = 6;
+  unsigned int n_ref_local     = 0;
+  unsigned int fe_degree_fine  = 4;
+  bool         paraview        = false;
+  bool         verbose         = true;
+  unsigned int p               = 0;
+  std::string  policy_name     = "";
+  std::string  mg_number_tyep  = "float";
+  std::string  simulation_type = "Constant";
 
   int min_level   = -1;
   int min_n_cells = -1;
@@ -1904,6 +1974,7 @@ struct RunParameters
     prm.add_parameter("CoarseSolverNCycles", mg_data.coarse_solver.n_cycles);
     prm.add_parameter("RelativeTolerance", mg_data.cg_normal.reltol);
     prm.add_parameter("MGNumberType", mg_number_tyep);
+    prm.add_parameter("SimulationType", simulation_type);
 
     std::ifstream file;
     file.open(file_name);
@@ -1920,15 +1991,16 @@ template <int dim,
 void
 run(const RunParameters &params, ConvergenceTable &table)
 {
-  const std::string  type           = params.type;
-  const std::string  geometry_type  = params.geometry_type;
-  const unsigned int n_ref_global   = params.n_ref_global;
-  const unsigned int n_ref_local    = params.n_ref_local;
-  const unsigned int fe_degree_fine = params.fe_degree_fine;
-  const bool         paraview       = params.paraview;
-  const bool         verbose        = params.verbose;
-  const unsigned int p              = params.p;
-  std::string        policy_name    = params.policy_name;
+  const std::string  type            = params.type;
+  const std::string  geometry_type   = params.geometry_type;
+  const unsigned int n_ref_global    = params.n_ref_global;
+  const unsigned int n_ref_local     = params.n_ref_local;
+  const unsigned int fe_degree_fine  = params.fe_degree_fine;
+  const bool         paraview        = params.paraview;
+  const bool         verbose         = params.verbose;
+  const unsigned int p               = params.p;
+  std::string        policy_name     = params.policy_name;
+  const std::string  simulation_type = params.simulation_type;
 
   using VectorType = LinearAlgebra::distributed::Vector<Number>;
 
@@ -2157,7 +2229,7 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   DoFHandler<dim> dof_handler(*triangulations.back());
 
-  AffineConstraints<Number>           constraint;
+  AffineConstraints<Number>           constraint, constraint_dbc;
   Operator<dim, n_components, Number> op;
 
   MappingQ1<dim> mapping;
@@ -2176,17 +2248,43 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   monitor("run::6");
 
+  std::shared_ptr<Function<dim, Number>> dbc_func;
+  std::shared_ptr<Function<dim, Number>> rhs_func;
+
+  if (simulation_type == "Constant")
+    {
+      rhs_func = std::make_shared<Functions::ConstantFunction<dim, Number>>(
+        1.0, n_components);
+      dbc_func = std::make_shared<Functions::ZeroFunction<dim, Number>>(1.0);
+    }
+  else if (simulation_type == "Gaussian")
+    {
+      const std::vector<Point<dim>> points = {Point<dim>(-0.5, -0.5, -0.5)};
+      const double                  width  = 0.5;
+
+      rhs_func = std::make_shared<GaussianRightHandSide<dim>>(points, width);
+      dbc_func = std::make_shared<GaussianSolution<dim>>(points, width);
+    }
+  else
+    {
+      AssertThrow(false, ExcNotImplemented());
+    }
+
   IndexSet locally_relevant_dofs;
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
+
   constraint.reinit(locally_relevant_dofs);
-  VectorTools::interpolate_boundary_values(mapping,
-                                           dof_handler,
-                                           0,
-                                           Functions::ZeroFunction<dim>(
-                                             n_components),
-                                           constraint);
+  VectorTools::interpolate_boundary_values(
+    mapping, dof_handler, 0, *dbc_func, constraint);
   DoFTools::make_hanging_node_constraints(dof_handler, constraint);
   constraint.close();
+
+
+  constraint_dbc.reinit(locally_relevant_dofs);
+  VectorTools::interpolate_boundary_values(
+    mapping, dof_handler, 0, *dbc_func, constraint_dbc);
+  DoFTools::make_hanging_node_constraints(dof_handler, constraint_dbc);
+  constraint_dbc.close();
 
   monitor("run::7");
 
@@ -2197,7 +2295,8 @@ run(const RunParameters &params, ConvergenceTable &table)
   VectorType solution, rhs;
   op.initialize_dof_vector(solution);
   op.initialize_dof_vector(rhs);
-  op.rhs(rhs);
+
+  op.rhs(rhs, rhs_func, mapping, dof_handler, quad);
 
   monitor("run::8");
 
@@ -2232,6 +2331,8 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   if (paraview == false)
     return;
+
+  constraint.distribute(solution);
 
   DataOutBase::VtkFlags flags;
   flags.write_higher_order_cells = true;
