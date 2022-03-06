@@ -2346,8 +2346,6 @@ run(const RunParameters &params, ConvergenceTable &table)
   if (paraview == false)
     return;
 
-  constraint.distribute(solution);
-
   DataOutBase::VtkFlags flags;
   flags.write_higher_order_cells = true;
 
