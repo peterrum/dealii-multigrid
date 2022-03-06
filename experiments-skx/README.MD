@@ -1,3 +1,8 @@
+# General commands
+```bash
+for cmd in *.cmd; do sbatch $cmd; done
+```
+
 # Section 4 and Section 5
 
 ## Local smoothing vs. global coarsening
@@ -24,53 +29,44 @@ cd ..
 mkdir small-scaling-hypercube
 cd small-scaling-hypercube
 python ../../dealii-multigrid/scripts/small-scaling-hypercube.py
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0001.cmd
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
+sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
+cd ..
+```
+
+```bash
+mkdir small-scaling-gaussian
+cd small-scaling-gaussian
+python ../../dealii-multigrid/scripts/small-scaling-gaussian.py
+sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
 ```
 
 ### Large scale
 
 ```
-mkdir large-scaling-annulus
-cd large-scaling-annulus
-python ../../dealii-multigrid/scripts/large_scaling.py --hmg --annulus
-python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
-sbatch node-0001.cmd
-sbatch node-0002.cmd
-sbatch node-0004.cmd
-sbatch node-0008.cmd
-sbatch node-0016.cmd
-sbatch node-0032.cmd
-sbatch node-0064.cmd
-sbatch node-0128.cmd
-sbatch node-0256.cmd
-sbatch node-0512.cmd
-sbatch node-1024.cmd
-sbatch node-2048.cmd
-sbatch node-3096.cmd
-cd ...
-```
+mkdir large-scaling-annulus-1
+cd large-scaling-annulus-1
+python ../../dealii-multigrid/scripts/large_scaling.py 1 --hmg --annulus
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
 
-```
-mkdir large-scaling-quadrant
-cd large-scaling-quadrant
-python ../../dealii-multigrid/scripts/large_scaling.py --hmg --quadrant
-python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
-sbatch node-0001.cmd
-sbatch node-0002.cmd
-sbatch node-0004.cmd
-sbatch node-0008.cmd
-sbatch node-0016.cmd
-sbatch node-0032.cmd
-sbatch node-0064.cmd
-sbatch node-0128.cmd
-sbatch node-0256.cmd
-sbatch node-0512.cmd
-sbatch node-1024.cmd
-sbatch node-2048.cmd
-sbatch node-3096.cmd
-cd ...
+mkdir large-scaling-annulus-4
+cd large-scaling-annulus-4
+python ../../dealii-multigrid/scripts/large_scaling.py 4 --hmg --annulus
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
+
+mkdir large-scaling-quadrant-1
+cd large-scaling-quadrant-1
+python ../../dealii-multigrid/scripts/large_scaling.py 1 --hmg --quadrant
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
+
+mkdir large-scaling-quadrant-4
+cd large-scaling-quadrant-4
+python ../../dealii-multigrid/scripts/large_scaling.py 4 --hmg --quadrant
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
 ```
 
 ## Global coarsening with first child policy
@@ -78,27 +74,42 @@ cd ...
 ```bash
 mkdir small-scaling-gc-fcp-annulus
 cd small-scaling-gc-fcp-annulus
-python ../../dealii-multigrid/scripts/small-scaling-gc-fcp.py annulus
+python ../../dealii-multigrid/scripts/small-scaling.py annulus FirstChildPolicy-2.0
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0192.cmd
 cd ..
 
 mkdir small-scaling-gc-fcp-quadrant
 cd small-scaling-gc-fcp-quadrant
-python ../../dealii-multigrid/scripts/small-scaling-gc-fcp.py quadrant
+python ../../dealii-multigrid/scripts/small-scaling.py quadrant FirstChildPolicy-2.0
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
 cd ..
+```
 
-mkdir small-scaling-gc-default-annulus
-cd small-scaling-gc-default-annulus
-python ../../dealii-multigrid/scripts/small-scaling-gc-default.py annulus
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0192.cmd
+```bash
+mkdir -p large-scaling-annulus-1-gc-fcp
+cd large-scaling-annulus-1-gc-fcp
+python ../../dealii-multigrid/scripts/large_scaling_partitioning.py annulus 1
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
 cd ..
 
-mkdir small-scaling-gc-default-quadrant
-cd small-scaling-gc-default-quadrant
-python ../../dealii-multigrid/scripts/small-scaling-gc-default.py quadrant
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
+mkdir -p large-scaling-annulus-4-gc-fcp
+cd large-scaling-annulus-4-gc-fcp
+python ../../dealii-multigrid/scripts/large_scaling_partitioning.py annulus 4
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
 cd ..
+
+mkdir -p large-scaling-quadrant-1-gc-fcp
+cd large-scaling-quadrant-1-gc-fcp
+python ../../dealii-multigrid/scripts/large_scaling_partitioning.py quadrant 1
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
+cd ..
+
+mkdir -p large-scaling-quadrant-4-gc-fcp
+cd large-scaling-quadrant-4-gc-fcp
+python ../../dealii-multigrid/scripts/large_scaling_partitioning.py quadrant 4
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
+cd ..
+
 ```
 
 # Section 6
@@ -106,22 +117,9 @@ cd ..
 ```
 mkdir large-scaling-quadrant-hp
 cd large-scaling-quadrant-hp
-python ../../dealii-multigrid/scripts/large_scaling.py --hpmg --quadrant
-python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
-sbatch node-0001.cmd
-sbatch node-0002.cmd
-sbatch node-0004.cmd
-sbatch node-0008.cmd
-sbatch node-0016.cmd
-sbatch node-0032.cmd
-sbatch node-0064.cmd
-sbatch node-0128.cmd
-sbatch node-0256.cmd
-sbatch node-0512.cmd
-sbatch node-1024.cmd
-sbatch node-2048.cmd
-sbatch node-3096.cmd
-cd ...
+python ../../dealii-multigrid/scripts/large_scaling.py 4 --hpmg --quadrant
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
 ```
 
 # Appendix to Section 5

@@ -350,18 +350,21 @@ monitor(const std::string &label)
 
   pcout << "MONITOR " << label << ": ";
 
-  const auto print = [&pcout](const double value) {
-    const auto min_max_avg =
-      dealii::Utilities::MPI::min_max_avg(value / 1e6, MPI_COMM_WORLD);
+  if (label != "break")
+    {
+      const auto print = [&pcout](const double value) {
+        const auto min_max_avg =
+          dealii::Utilities::MPI::min_max_avg(value / 1e6, MPI_COMM_WORLD);
 
-    pcout << min_max_avg.min << " " << min_max_avg.max << " " << min_max_avg.avg
-          << " " << min_max_avg.sum << " ";
-  };
+        pcout << min_max_avg.min << " " << min_max_avg.max << " "
+              << min_max_avg.avg << " " << min_max_avg.sum << " ";
+      };
 
-  print(stats.VmPeak);
-  print(stats.VmSize);
-  print(stats.VmHWM);
-  print(stats.VmRSS);
+      print(stats.VmPeak);
+      print(stats.VmSize);
+      print(stats.VmHWM);
+      print(stats.VmRSS);
+    }
 
   pcout << std::endl;
 }
@@ -1088,11 +1091,11 @@ mg_solve(SolverControl &                              solver_control,
                                         min_level,
                                         min_level + offset - 1);
 
-  if constexpr (!std::is_same<MGTransferTypeCoarse,
-                              MGTransferGlobalCoarsening<
-                                dim,
-                                typename SystemMatrixType::VectorType>>::value)
-    mg_intermediate.set_edge_matrices(mg_interface, mg_interface);
+  if constexpr (!std::is_same<
+                  MGTransferTypeCoarse,
+                  MGTransferGlobalCoarsening<dim, VectorType>>::value)
+    if (dof_fine.get_triangulation().has_hanging_nodes())
+      mg_intermediate.set_edge_matrices(mg_interface, mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeCoarse> preconditioner_mg(
     dof_intermediate, mg_intermediate, mg_transfer_intermediate);
@@ -1113,11 +1116,11 @@ mg_solve(SolverControl &                              solver_control,
                                 min_level + offset,
                                 max_level);
 
-  if constexpr (!std::is_same<MGTransferTypeFine,
-                              MGTransferGlobalCoarsening<
-                                dim,
-                                typename SystemMatrixType::VectorType>>::value)
-    mg_fine.set_edge_matrices(mg_interface, mg_interface);
+  if constexpr (!std::is_same<
+                  MGTransferTypeFine,
+                  MGTransferGlobalCoarsening<dim, VectorType>>::value)
+    if (dof_fine.get_triangulation().has_hanging_nodes())
+      mg_fine.set_edge_matrices(mg_interface, mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeFine> preconditioner(
     dof_fine, mg_fine, mg_transfer_fine);
@@ -1449,6 +1452,8 @@ solve_with_global_coarsening(
   const auto comm     = dof_handler_in.get_communicator();
   auto       sub_comm = comm;
 
+  monitor("solve_with_global_coarsening::0");
+
   {
     unsigned int cell_counter = 0;
 
@@ -1489,6 +1494,8 @@ solve_with_global_coarsening(
   }
 
   {
+    monitor("solve_with_global_coarsening::1");
+
     const auto level_degrees =
       MGTransferGlobalCoarseningTools::create_polynomial_coarsening_sequence(
         dof_handler_in.get_fe().degree,
@@ -1520,6 +1527,8 @@ solve_with_global_coarsening(
     MGLevelObject<LevelOperatorType> operators(min_level, max_level);
 
     MappingQ1<dim> mapping;
+
+    monitor("solve_with_global_coarsening::2");
 
     for (auto l = min_level; l <= max_level; ++l)
       {
@@ -1579,6 +1588,8 @@ solve_with_global_coarsening(
         op.reinit(mapping, dof_handler, quad, constraint);
       }
 
+    monitor("solve_with_global_coarsening::3");
+
     for (unsigned int l = min_level; l < max_level; ++l)
       transfers[l + 1].reinit(dof_handlers[l + 1],
                               dof_handlers[l],
@@ -1601,6 +1612,8 @@ solve_with_global_coarsening(
       transfer(transfers, [&](const auto l, auto &vec) {
         operators[l].initialize_dof_vector(vec);
       });
+
+    monitor("solve_with_global_coarsening::4");
 
     ReductionControl solver_control(mg_data.do_parameter_study ?
                                       mg_data.cg_parameter_study.maxiter :
@@ -1627,6 +1640,8 @@ solve_with_global_coarsening(
              verbose,
              sub_comm,
              table);
+
+    monitor("solve_with_global_coarsening::5");
   }
 
   if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
@@ -2029,7 +2044,7 @@ run(const RunParameters &params, ConvergenceTable &table)
   else
     AssertThrow(false, ExcNotImplemented());
 
-  monitor("run::2");
+  monitor("run::2-" + std::to_string(tria.n_global_active_cells()));
 
   std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy;
 
@@ -2229,7 +2244,7 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   DoFHandler<dim> dof_handler(*triangulations.back());
 
-  AffineConstraints<Number>           constraint, constraint_dbc;
+  AffineConstraints<Number>           constraint;
   Operator<dim, n_components, Number> op;
 
   MappingQ1<dim> mapping;
@@ -2260,7 +2275,7 @@ run(const RunParameters &params, ConvergenceTable &table)
   else if (simulation_type == "Gaussian")
     {
       const std::vector<Point<dim>> points = {Point<dim>(-0.5, -0.5, -0.5)};
-      const double                  width  = 0.5;
+      const double                  width  = 0.1;
 
       rhs_func = std::make_shared<GaussianRightHandSide<dim>>(points, width);
       dbc_func = std::make_shared<GaussianSolution<dim>>(points, width);
@@ -2278,13 +2293,6 @@ run(const RunParameters &params, ConvergenceTable &table)
     mapping, dof_handler, 0, *dbc_func, constraint);
   DoFTools::make_hanging_node_constraints(dof_handler, constraint);
   constraint.close();
-
-
-  constraint_dbc.reinit(locally_relevant_dofs);
-  VectorTools::interpolate_boundary_values(
-    mapping, dof_handler, 0, *dbc_func, constraint_dbc);
-  DoFTools::make_hanging_node_constraints(dof_handler, constraint_dbc);
-  constraint_dbc.close();
 
   monitor("run::7");
 
@@ -2329,10 +2337,10 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   monitor("run::9");
 
+  monitor("break");
+
   if (paraview == false)
     return;
-
-  constraint.distribute(solution);
 
   DataOutBase::VtkFlags flags;
   flags.write_higher_order_cells = true;

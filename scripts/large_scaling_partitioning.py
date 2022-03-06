@@ -25,6 +25,7 @@ def run_instance(counter, geometry_type, n_refinements, k, solver, partitioner):
 def main():
 
     geometry_type = sys.argv[1]
+    degree        = sys.argv[2]
     
     if geometry_type == "quadrant":
         min_ref = 3;
@@ -33,20 +34,13 @@ def main():
     else:
         print('Geometry type not known!')
 
-    partitioner_type = ""
-    if len(sys.argv) >= 3:
-        partitioner_type = sys.argv[2];
-
-    if partitioner_type == "":
-      solvers = ["HMG-local", "HMG-global"]
-    else:
-      solvers = ["HMG-global"]
+    solvers = [["HMG-local",""], ["HMG-global", ""], ["HMG-global", "FirstChildPolicy-2.0"]]
 
     counter = 0
 
-    for n_refinements in range(min_ref,20): # number of refinements
-        for k in [1, 4]:                    # degree
-            for solver in solvers:          # h-multigrid types
+    for n_refinements in range(min_ref,20):            # number of refinements
+        for k in [degree]:                             # degree
+            for [solver, partitioner_type] in solvers: # h-multigrid types
                 run_instance(counter, geometry_type, n_refinements, k, solver, partitioner_type)
                 counter = counter + 1;
 

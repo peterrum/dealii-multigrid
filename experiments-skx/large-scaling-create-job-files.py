@@ -15,9 +15,9 @@ cmd = """#!/bin/bash
 #SBATCH -D ./
 #Notification and type
 #SBATCH --mail-type=END
-#SBATCH --mail-user=munch@lnm.mw.tum.de
+#SBATCH --mail-user=peter.muench@tum.de
 # Wall clock limit:
-#SBATCH --time=0:30:00
+#SBATCH --time=1:00:00
 #SBATCH --no-requeue
 #Setup of execution environment
 #SBATCH --export=NONE
@@ -54,11 +54,17 @@ mpirun -np {3} ../multigrid_throughput_params \"${{array[@]}}\"
 """
 
 def main():
-    for n in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]:
+
+    max_nodes = 1000000
+
+    if len(sys.argv) > 1:
+      max_nodes = int(sys.argv[1])
+
+    for n in [ a for a in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 3072] if a <= max_nodes]:
 
         label = ""
         if n <= 16:
-            label = "test"
+            label = "micro"
         elif n <= 768:
             label = "general"
         elif n <= 3072:

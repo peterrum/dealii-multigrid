@@ -3,13 +3,13 @@
 import json
 import os
 
-def run_instance(counter, t, n_refinements, min_level, coarse_grid_solver_type, n_cyles):
+def run_instance(counter, solver, n_refinements, min_level, coarse_grid_solver_type, n_cyles):
+    # read default settings
     with open(os.path.dirname(os.path.abspath(__file__)) + "/default.json", 'r') as f:
        datastore = json.load(f)
 
     # make modifications
-    datastore["Type"]                 = t
-    datastore["GeometryType"]         = "quadrant"
+    datastore["Type"]                 = solver
     datastore["NRefGlobal"]           = n_refinements
     datastore["Degree"]               = 4
     datastore["MinLevel"]             = min_level

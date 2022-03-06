@@ -412,6 +412,8 @@ public:
       true);
 
     AffineConstraints<number> constraints_without_dbc;
+    constraints_without_dbc.reinit(
+      DoFTools::extract_locally_relevant_dofs(dof_handler));
     DoFTools::make_hanging_node_constraints(dof_handler,
                                             constraints_without_dbc);
     constraints_without_dbc.close();
@@ -420,7 +422,6 @@ public:
 
     this->initialize_dof_vector(b);
     this->initialize_dof_vector(x);
-
 
     typename MatrixFree<dim, number>::AdditionalData data;
     data.mapping_update_flags =
