@@ -14,11 +14,11 @@
 #include <deal.II/grid/cell_id_translator.h>
 #include <deal.II/grid/grid_generator.h>
 
+#include <deal.II/matrix_free/matrix_free.h>
+
 #include <deal.II/multigrid/mg_constrained_dofs.h>
 #include <deal.II/multigrid/mg_transfer_global_coarsening.h>
 #include <deal.II/multigrid/mg_transfer_matrix_free.h>
-
-#include <deal.II/matrix_free/matrix_free.h>
 
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools.h>
@@ -62,37 +62,38 @@ monitor(const std::string &label)
 void
 run(const unsigned int fe_degree)
 {
-  const unsigned int dim          = 3;
+  const unsigned int dim = 3;
 
   ConditionalOStream pcout(std::cout,
                            Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) ==
                              0);
 
-  for(unsigned int n_refinements = 4; n_refinements < 20; ++n_refinements)
-  {
+  for (unsigned int n_refinements = 4; n_refinements < 20; ++n_refinements)
+    {
+      parallel::distributed::Triangulation<dim> tria(
+        MPI_COMM_WORLD,
+        Triangulation<dim>::MeshSmoothing::none,
+        parallel::distributed::Triangulation<
+          dim>::construct_multigrid_hierarchy);
 
-  parallel::distributed::Triangulation<dim> tria(
-    MPI_COMM_WORLD,
-    Triangulation<dim>::MeshSmoothing::none,
-    parallel::distributed::Triangulation<dim>::construct_multigrid_hierarchy);
+      monitor("empty");
 
-    monitor("empty");
-  
-  GridGenerator::create_quadrant(tria, n_refinements);
+      GridGenerator::create_quadrant(tria, n_refinements);
 
-    monitor("tria");
+      monitor("tria");
 
-    DoFHandler<dim> dof_handler(tria);
-    dof_handler.distribute_dofs(FE_Q<dim>(fe_degree));
+      DoFHandler<dim> dof_handler(tria);
+      dof_handler.distribute_dofs(FE_Q<dim>(fe_degree));
 
-    monitor("dofhandler");
+      monitor("dofhandler");
 
-    dof_handler.distribute_mg_dofs();
+      dof_handler.distribute_mg_dofs();
 
-    monitor("dofhandler_mg");
+      monitor("dofhandler_mg");
 
-    pcout << "# " << n_refinements << " " << tria.n_global_active_cells() << " " << dof_handler.n_dofs() << std::endl;
-  }
+      pcout << "# " << n_refinements << " " << tria.n_global_active_cells()
+            << " " << dof_handler.n_dofs() << std::endl;
+    }
 }
 
 int
@@ -100,7 +101,7 @@ main(int argc, char **argv)
 {
   Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
-  const unsigned int degree       = argc > 1 ? atoi(argv[1]) : 4;
+  const unsigned int degree = argc > 1 ? atoi(argv[1]) : 4;
 
   run(degree);
 }

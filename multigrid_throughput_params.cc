@@ -350,22 +350,20 @@ monitor(const std::string &label)
 
   pcout << "MONITOR " << label << ": ";
 
-  if(label != "break")
+  if (label != "break")
     {
+      const auto print = [&pcout](const double value) {
+        const auto min_max_avg =
+          dealii::Utilities::MPI::min_max_avg(value / 1e6, MPI_COMM_WORLD);
 
-  const auto print = [&pcout](const double value) {
-    const auto min_max_avg =
-      dealii::Utilities::MPI::min_max_avg(value / 1e6, MPI_COMM_WORLD);
+        pcout << min_max_avg.min << " " << min_max_avg.max << " "
+              << min_max_avg.avg << " " << min_max_avg.sum << " ";
+      };
 
-    pcout << min_max_avg.min << " " << min_max_avg.max << " " << min_max_avg.avg
-          << " " << min_max_avg.sum << " ";
-  };
-
-  print(stats.VmPeak);
-  print(stats.VmSize);
-  print(stats.VmHWM);
-  print(stats.VmRSS);
-
+      print(stats.VmPeak);
+      print(stats.VmSize);
+      print(stats.VmHWM);
+      print(stats.VmRSS);
     }
 
   pcout << std::endl;
@@ -1093,11 +1091,10 @@ mg_solve(SolverControl &                              solver_control,
                                         min_level,
                                         min_level + offset - 1);
 
-  if constexpr (!std::is_same<MGTransferTypeCoarse,
-                              MGTransferGlobalCoarsening<
-                                dim,
-                                VectorType>>::value)
-    if(dof_fine.get_triangulation().has_hanging_nodes())                            
+  if constexpr (!std::is_same<
+                  MGTransferTypeCoarse,
+                  MGTransferGlobalCoarsening<dim, VectorType>>::value)
+    if (dof_fine.get_triangulation().has_hanging_nodes())
       mg_intermediate.set_edge_matrices(mg_interface, mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeCoarse> preconditioner_mg(
@@ -1119,11 +1116,10 @@ mg_solve(SolverControl &                              solver_control,
                                 min_level + offset,
                                 max_level);
 
-  if constexpr (!std::is_same<MGTransferTypeFine,
-                              MGTransferGlobalCoarsening<
-                                dim,
-                                VectorType>>::value)
-    if(dof_fine.get_triangulation().has_hanging_nodes())                            
+  if constexpr (!std::is_same<
+                  MGTransferTypeFine,
+                  MGTransferGlobalCoarsening<dim, VectorType>>::value)
+    if (dof_fine.get_triangulation().has_hanging_nodes())
       mg_fine.set_edge_matrices(mg_interface, mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeFine> preconditioner(

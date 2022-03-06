@@ -13,11 +13,11 @@
 #include <deal.II/grid/cell_id_translator.h>
 #include <deal.II/grid/grid_generator.h>
 
+#include <deal.II/matrix_free/matrix_free.h>
+
 #include <deal.II/multigrid/mg_constrained_dofs.h>
 #include <deal.II/multigrid/mg_transfer_global_coarsening.h>
 #include <deal.II/multigrid/mg_transfer_matrix_free.h>
-
-#include <deal.II/matrix_free/matrix_free.h>
 
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools.h>
@@ -172,11 +172,14 @@ namespace dealii::MGTools
         constraint.close();
 
 
-    typename MatrixFree<dim, Number>::AdditionalData data;
-    data.mg_level             = l;
+        typename MatrixFree<dim, Number>::AdditionalData data;
+        data.mg_level = l;
 
         MatrixFree<dim, Number> matrix_free;
-        matrix_free.reinit(dof_handler, constraint, QGauss<dim>(fe_degree_fine), data);
+        matrix_free.reinit(dof_handler,
+                           constraint,
+                           QGauss<dim>(fe_degree_fine),
+                           data);
 
         partitioners[l] = matrix_free.get_vector_partitioner();
       }
@@ -188,8 +191,8 @@ namespace dealii::MGTools
 
       for (auto l = min_level; l <= max_level; ++l)
         external_partitioners.emplace_back(partitioners[l]);
-        
-    transfer.build(dof_handler, external_partitioners);
+
+      transfer.build(dof_handler, external_partitioners);
     }
 
     run_transfer_test(transfer, partitioners); // run tests
@@ -253,7 +256,9 @@ namespace dealii::MGTools
         constraint.close();
 
         MatrixFree<dim, double> matrix_free;
-        matrix_free.reinit(dof_handler, constraint, QGauss<dim>(dof_handler.get_fe().degree + 1));
+        matrix_free.reinit(dof_handler,
+                           constraint,
+                           QGauss<dim>(dof_handler.get_fe().degree + 1));
 
         partitioners[l] = matrix_free.get_vector_partitioner();
       }
@@ -264,9 +269,11 @@ namespace dealii::MGTools
                               constraints[l + 1],
                               constraints[l]);
 
-    MGTransferGlobalCoarsening<dim, VectorType> transfer(transfers, [&](const auto l, auto &vec) {
-      vec.reinit(partitioners[l]);;
-    });
+    MGTransferGlobalCoarsening<dim, VectorType> transfer(
+      transfers, [&](const auto l, auto &vec) {
+        vec.reinit(partitioners[l]);
+        ;
+      });
 
     run_transfer_test(transfer, partitioners); // run tests
   }
@@ -282,35 +289,34 @@ run(const unsigned int n_ref_global, const unsigned int fe_degree_fine)
   parallel::distributed::Triangulation<dim, spacedim> tria(
     MPI_COMM_WORLD,
     Triangulation<dim, spacedim>::MeshSmoothing::none,
-    parallel::distributed::Triangulation<dim, spacedim>::construct_multigrid_hierarchy);
-  
+    parallel::distributed::Triangulation<dim, spacedim>::
+      construct_multigrid_hierarchy);
+
   GridGenerator::hyper_cube(tria, -1.0, +1.0);
   tria.refine_global(n_ref_global);
 
-    {
-  std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy =
-            std::make_unique<RepartitioningPolicyTools::FirstChildPolicy<dim>>(
-              tria);
+  {
+    std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy =
+      std::make_unique<RepartitioningPolicyTools::FirstChildPolicy<dim>>(tria);
 
-      const auto trias =
-        MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
-          tria, *policy, true, true);
+    const auto trias =
+      MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
+        tria, *policy, true, true);
 
-      if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
-        std::cout << "GLOBAL COARSENING:" << std::endl;
+    if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+      std::cout << "GLOBAL COARSENING:" << std::endl;
 
-      // MGTools::print_multigrid_statistics(trias);
-      MGTools::run_transfer_test(trias, fe_degree_fine, n_components);
-    }
+    // MGTools::print_multigrid_statistics(trias);
+    MGTools::run_transfer_test(trias, fe_degree_fine, n_components);
+  }
 
-    {
-      if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
-        std::cout << "LOCAL SMOOTHING:" << std::endl;
+  {
+    if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+      std::cout << "LOCAL SMOOTHING:" << std::endl;
 
-      // MGTools::print_multigrid_statistics(tria);
-      MGTools::run_transfer_test(tria, fe_degree_fine, n_components);
-    }
-
+    // MGTools::print_multigrid_statistics(tria);
+    MGTools::run_transfer_test(tria, fe_degree_fine, n_components);
+  }
 }
 
 int
