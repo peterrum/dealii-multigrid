@@ -412,7 +412,8 @@ public:
       true);
 
     AffineConstraints<number> constraints_without_dbc;
-    constraints_without_dbc.reinit(DoFTools::extract_locally_relevant_dofs(dof_handler));
+    constraints_without_dbc.reinit(
+      DoFTools::extract_locally_relevant_dofs(dof_handler));
     DoFTools::make_hanging_node_constraints(dof_handler,
                                             constraints_without_dbc);
     constraints_without_dbc.close();
