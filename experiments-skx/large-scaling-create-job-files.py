@@ -57,7 +57,7 @@ def main():
 
     max_nodes = 1000000
 
-    if len(sys.argv[1]) > 1:
+    if len(sys.argv) > 1:
       max_nodes = int(sys.argv[1])
 
     for n in [ a for a in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 3072] if a <= max_nodes]:

@@ -2,8 +2,8 @@ import json
 import os
 from argparse import ArgumentParser
 
-def run_instance(counter, simulation, n_refinements, k, type, policy, max_level):
-    with open(os.path.dirname(os.path.abspath(__file__)) + "/large_scaling.json", 'r') as f:
+def run_instance(counter, simulation, n_refinements, k, type):
+    with open(os.path.dirname(os.path.abspath(__file__)) + "/default.json", 'r') as f:
        datastore = json.load(f)
 
     # make modifications
@@ -11,10 +11,6 @@ def run_instance(counter, simulation, n_refinements, k, type, policy, max_level)
     datastore["NRefGlobal"]          = n_refinements
     datastore["Degree"]              = k
     datastore["Type"]                = type
-    datastore["SmootherDegree"]      = 3
-    datastore["PartitionerName"]     = policy
-    datastore["MinLevel"]            = max_level
-    datastore["CoarseSolverNCycles"] = 2
 
     # write data to output file
     with open("./input_%s.json" % (str(counter).zfill(4)), 'w') as f:
@@ -22,6 +18,8 @@ def run_instance(counter, simulation, n_refinements, k, type, policy, max_level)
 
 def parseArguments():
     parser = ArgumentParser(description="Submit a simulation as a batch job")
+
+    parser.add_argument('k', type=int)
     
     parser.add_argument("--hmg",  help="Run h-multigrid.",  action="store_true")
     parser.add_argument("--hpmg", help="Run h-pmultigrid.", action="store_true")
@@ -35,6 +33,8 @@ def parseArguments():
 def main():
     options = parseArguments()
 
+    k = options.k
+
     if options.quadrant:
         simulation = "quadrant"
     elif options.annulus:
@@ -44,35 +44,26 @@ def main():
 
     if options.hmg == options.hpmg:
         raise ValueError("You have to select either hmg or hpmg.")
+        
+    if options.hpmg:
+        if options.k == 1:
+            raise Exception("p-multigrid only working for k>1!")
     
-    counter = 0;
+    counter = 0
 
     for n_refinements in range(3,20):
-        
+        # local smoothing
         if options.hmg:
-            ks = [1, 4]
+            run_instance(counter, simulation, n_refinements, k, "HMG-local")
+            counter = counter + 1;
         else:
-            ks = [4]
+            run_instance(counter, simulation, n_refinements, k, "HPMG-local")
+            counter = counter + 1;
 
-        for k in ks:
-            # local smoothing
-            if options.hmg:
-                run_instance(counter, simulation, n_refinements, k, "HMG-local",  "DefaultPolicy", 0)
-                counter = counter + 1;
-            else:
-                for policy in ["DefaultPolicy", "CellWeightPolicy-1.0", "CellWeightPolicy-1.5", "CellWeightPolicy-2.0", "CellWeightPolicy-2.5", "CellWeightPolicy-3.0", "FirstChildPolicy"]:
-                    run_instance(counter, simulation, n_refinements, k, "HPMG-local",  policy, 0)
-                    counter = counter + 1;
+        # global coarsening
+        run_instance(counter, simulation, n_refinements, k, "HMG-global" if options.hmg else "HPMG")
 
-            # global coarsening
-            for policy in ["DefaultPolicy", "CellWeightPolicy-1.0", "CellWeightPolicy-1.5", "CellWeightPolicy-2.0", "CellWeightPolicy-2.5", "CellWeightPolicy-3.0", "FirstChildPolicy"]:
-                run_instance(counter, simulation, n_refinements, k, "HMG-global" if options.hmg else "HPMG",  policy, 0)
-                counter = counter + 1;
-
-            ## HP-multigrid + AMG
-            #if options.hpmg:
-            #    run_instance(counter, simulation, n_refinements, k, "PMG",  "DefaultPolicy", n_refinements + 1)
-            #    counter = counter + 1;
+        counter = counter + 1;
 
 
 if __name__== "__main__":

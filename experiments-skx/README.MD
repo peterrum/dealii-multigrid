@@ -44,19 +44,29 @@ cd ..
 ### Large scale
 
 ```
-mkdir large-scaling-annulus
-cd large-scaling-annulus
-python ../../dealii-multigrid/scripts/large_scaling.py --hmg --annulus
-python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
-cd ...
-```
+mkdir large-scaling-annulus-1
+cd large-scaling-annulus-1
+python ../../dealii-multigrid/scripts/large_scaling.py 1 --hmg --annulus
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
 
-```
-mkdir large-scaling-quadrant
-cd large-scaling-quadrant
-python ../../dealii-multigrid/scripts/large_scaling.py --hmg --quadrant
-python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
-cd ...
+mkdir large-scaling-annulus-4
+cd large-scaling-annulus-4
+python ../../dealii-multigrid/scripts/large_scaling.py 4 --hmg --annulus
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
+
+mkdir large-scaling-quadrant-1
+cd large-scaling-quadrant-1
+python ../../dealii-multigrid/scripts/large_scaling.py 1 --hmg --quadrant
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
+
+mkdir large-scaling-quadrant-4
+cd large-scaling-quadrant-4
+python ../../dealii-multigrid/scripts/large_scaling.py 4 --hmg --quadrant
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
 ```
 
 ## Global coarsening with first child policy
@@ -107,9 +117,9 @@ cd ..
 ```
 mkdir large-scaling-quadrant-hp
 cd large-scaling-quadrant-hp
-python ../../dealii-multigrid/scripts/large_scaling.py --hpmg --quadrant
-python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py
-cd ...
+python ../../dealii-multigrid/scripts/large_scaling.py 4 --hpmg --quadrant
+python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 1024 # TODO
+cd ..
 ```
 
 # Appendix to Section 5
