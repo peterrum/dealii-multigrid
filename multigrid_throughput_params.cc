@@ -2350,10 +2350,27 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   data_out.attach_dof_handler(dof_handler);
 
-
   solution.update_ghost_values();
   constraint.distribute(solution);
   data_out.add_data_vector(solution, "solution");
+
+  if (false)
+    data_out.set_cell_selection(
+      [](const typename Triangulation<dim>::cell_iterator &cell) {
+        if (cell->is_active() && cell->is_locally_owned())
+          {
+            const auto center = cell->center();
+
+            bool flag = center[0] <= -0.5;
+
+            for (unsigned int d = 1; d < dim; ++d)
+              flag |= (center[d] <= -0.5);
+
+            return flag;
+          }
+
+        return false;
+      });
 
 
   data_out.build_patches(mapping, 3);
