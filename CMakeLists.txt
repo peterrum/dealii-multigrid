@@ -16,26 +16,33 @@ IF(NOT ${deal.II_FOUND})
 ENDIF()
 
 DEAL_II_INITIALIZE_CACHED_VARIABLES()
+
 PROJECT("exmples")
 
+ADD_LIBRARY(exmples  dummy.cc)
+
+ADD_CUSTOM_TARGET(debug
+  COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=Debug ${CMAKE_SOURCE_DIR}
+  COMMENT "Switch CMAKE_BUILD_TYPE to Debug\nPlease call 'make' to build the debug project"
+  )
+
+ADD_CUSTOM_TARGET(release
+  COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=Release ${CMAKE_SOURCE_DIR}
+  COMMENT "Switch CMAKE_BUILD_TYPE to Release\nPlease call 'make' to build the release project"
+  )
+
 DEAL_II_INITIALIZE_CACHED_VARIABLES()
+
+DEAL_II_SETUP_TARGET(exmples)
 
 file(GLOB files "*.cc")
 foreach(file ${files})
   get_filename_component(app ${file} NAME_WLE)
 
-  ADD_EXECUTABLE(${app} ${file})
-  TARGET_COMPILE_DEFINITIONS(${app} PRIVATE SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-  DEAL_II_SETUP_TARGET(${app})
+  if(NOT "${app}" STREQUAL "dummy")
+    ADD_EXECUTABLE(${app} ${file})
+    DEAL_II_SETUP_TARGET(${app})
+    TARGET_LINK_LIBRARIES(${app} "exmples")
+  endif()
 
 endforeach()
-
-IF(EXISTS ${CMAKE_SOURCE_DIR}/tests/CMakeLists.txt)
-  SET(DEAL_II_HAVE_TESTS_DIRECTORY TRUE)
-ENDIF()
-
-enable_testing()
-
-DEAL_II_PICKUP_TESTS("tests")
-
-
