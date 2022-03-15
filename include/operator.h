@@ -136,27 +136,13 @@ public:
           .local_element(edge_constrained_indices[i]) = 0.;
       }
 
-    for (unsigned int i = 0; i < constrained_indices.size(); ++i)
-      {
-        constrained_values[i] =
-          std::pair<number, number>(src.local_element(constrained_indices[i]),
-                                    dst.local_element(constrained_indices[i]));
-
-        const_cast<LinearAlgebra::distributed::Vector<number> &>(src)
-          .local_element(constrained_indices[i]) = 0.;
-      }
-
     this->matrix_free.cell_loop(
       &Operator::do_cell_integral_range, this, dst, src, true);
 
-
     // set constrained dofs as the sum of current dst value and src value
     for (unsigned int i = 0; i < constrained_indices.size(); ++i)
-      {
-        const_cast<LinearAlgebra::distributed::Vector<number> &>(src)
-          .local_element(constrained_indices[i])  = constrained_values[i].first;
-        dst.local_element(constrained_indices[i]) = constrained_values[i].first;
-      }
+      dst.local_element(constrained_indices[i]) =
+        src.local_element(constrained_indices[i]);
 
     // restoring edge constrained dofs in src and dst
     for (unsigned int i = 0; i < edge_constrained_indices.size(); ++i)
@@ -193,10 +179,8 @@ public:
     dst = 0.0;
 
     for (unsigned int i = 0; i < edge_constrained_indices.size(); ++i)
-      {
-        dst.local_element(edge_constrained_indices[i]) =
-          dst_copy.local_element(edge_constrained_indices[i]);
-      }
+      dst.local_element(edge_constrained_indices[i]) =
+        dst_copy.local_element(edge_constrained_indices[i]);
   }
 
   void
@@ -216,10 +200,8 @@ public:
     src_cpy.reinit(src, /*omit_zeroing_entries=*/false);
 
     for (unsigned int i = 0; i < edge_constrained_indices.size(); ++i)
-      {
-        src_cpy.local_element(edge_constrained_indices[i]) =
-          src.local_element(edge_constrained_indices[i]);
-      }
+      src_cpy.local_element(edge_constrained_indices[i]) =
+        src.local_element(edge_constrained_indices[i]);
 
     // do loop with copy of src
     this->matrix_free.cell_loop(
