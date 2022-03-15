@@ -1650,7 +1650,7 @@ solve_with_global_coarsening(
   if (verbose)
     {
       const auto stats = MGTools::print_multigrid_statistics(triangulations);
-      for (const auto stat : stats)
+      for (const auto &stat : stats)
         {
           table.add_value(stat.first, stat.second);
           table.set_scientific(stat.first, true);
@@ -1795,7 +1795,8 @@ solve_with_local_smoothing(
   transfer_ls.build(dof_handlers.front(), partitioners);
 
   if (do_pmg)
-    for (auto l = dof_handler_in.get_triangulation().n_global_levels(), c = 0;
+    for (unsigned int l = dof_handler_in.get_triangulation().n_global_levels(),
+                      c = 0;
          l < max_level;
          ++l, ++c)
       transfers[l + 1].reinit(dof_handlers[c + 1],
@@ -1856,7 +1857,7 @@ solve_with_local_smoothing(
     {
       const auto stats =
         MGTools::print_multigrid_statistics(dof_handler_in.get_triangulation());
-      for (const auto stat : stats)
+      for (const auto &stat : stats)
         {
           table.add_value(stat.first, stat.second);
           table.set_scientific(stat.first, true);
@@ -1889,6 +1890,7 @@ solve_with_amg(const std::string &        type,
 
   double time = 0.0;
 
+#ifdef DEAL_II_WITH_TRILINOS
   if (type == "AMG")
     {
       TrilinosWrappers::PreconditionAMG                 preconditioner;
@@ -1901,6 +1903,10 @@ solve_with_amg(const std::string &        type,
           .solve(op.get_trilinos_system_matrix(), dst, src, preconditioner);
       }
     }
+#else
+  if (false)
+    {}
+#endif
 #ifdef DEAL_II_WITH_PETSC
   else if (type == "AMGPETSc")
     {

@@ -53,7 +53,9 @@ public:
          const AffineConstraints<number> &constraints,
          const unsigned int mg_level = numbers::invalid_unsigned_int)
   {
+#ifdef DEAL_II_WITH_TRILINOS
     this->trilinos_system_matrix.clear();
+#endif
 
     this->constraints.copy_from(constraints);
 
@@ -224,6 +226,7 @@ public:
       i = (std::abs(i) > 1.0e-10) ? (1.0 / i) : 1.0;
   }
 
+#ifdef DEAL_II_WITH_TRILINOS
   virtual const TrilinosWrappers::SparseMatrix &
   get_trilinos_system_matrix() const
   {
@@ -266,6 +269,7 @@ public:
 
     return this->trilinos_system_matrix;
   }
+#endif
 
 
 #ifdef DEAL_II_WITH_PETSC
@@ -473,7 +477,9 @@ private:
 
   AffineConstraints<number> constraints;
 
+#ifdef DEAL_II_WITH_TRILINOS
   mutable TrilinosWrappers::SparseMatrix trilinos_system_matrix;
+#endif
 
 #ifdef DEAL_II_WITH_PETSC
   mutable PETScWrappers::MPI::SparseMatrix petsc_system_matrix;
