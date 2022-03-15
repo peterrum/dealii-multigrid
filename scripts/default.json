@@ -1,5 +1,5 @@
 {
-    "Type" : "HMG",
+    "Type" : "HMG-global",
     "GeometryType" : "quadrant",
     "NRefGlobal" : "7",
     "NRefLocal" : "0",

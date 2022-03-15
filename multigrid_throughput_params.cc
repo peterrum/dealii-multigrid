@@ -872,7 +872,7 @@ mg_solve(SolverControl &                              solver_control,
         mg_data.smoother.eig_cg_n_iterations;
     }
 
-  MGSmootherPrecondition<LevelMatrixType, SmootherType, VectorType> mg_smoother;
+  mg::SmootherRelaxation<SmootherType, VectorType> mg_smoother;
   mg_smoother.initialize(mg_matrices, smoother_data);
 
   monitor("mg_solve::1");
