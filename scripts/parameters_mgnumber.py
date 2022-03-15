@@ -23,8 +23,8 @@ def main():
     counter = 0;
 
     for n_refinements in range(3,20):                      # number of refinements
-        for tolerance in ["double", "float"]:              # multigrid number
-            for k in [1, 4]:                               # degree
+        for k in [1, 4]:                                   # degree
+            for tolerance in ["double", "float"]:          # multigrid number
                 for solver in ["HMG-local", "HMG-global"]: # h-multigrid types
                     run_instance(counter, n_refinements, k, solver, tolerance)
                     counter = counter + 1;

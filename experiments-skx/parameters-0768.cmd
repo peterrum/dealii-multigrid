@@ -10,7 +10,7 @@
 #SBATCH --mail-type=END
 #SBATCH --mail-user=munch@lnm.mw.tum.de
 # Wall clock limit:
-#SBATCH --time=0:30:00
+#SBATCH --time=1:00:00
 #SBATCH --no-requeue
 #Setup of execution environment
 #SBATCH --export=NONE
@@ -18,7 +18,7 @@
 #SBATCH --account=pr83te
 #
 ## #SBATCH --switches=4@24:00:00
-#SBATCH --partition=test
+#SBATCH --partition=micro
 #Number of nodes and MPI tasks per node:
 #SBATCH --nodes=16
 #SBATCH --ntasks-per-node=48
