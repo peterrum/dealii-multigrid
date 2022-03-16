@@ -92,6 +92,56 @@ public:
         this->has_edge_constrained_indices =
           Utilities::MPI::max(edge_constrained_indices.size(),
                               dof_handler.get_communicator()) > 0;
+
+        if (this->has_edge_constrained_indices)
+          {
+            edge_constrained_cell.resize(matrix_free.n_cell_batches(), false);
+
+            VectorType temp;
+            matrix_free.initialize_dof_vector(temp);
+
+            for (unsigned int i = 0; i < edge_constrained_indices.size(); ++i)
+              temp.local_element(edge_constrained_indices[i]) = 1.0;
+
+            temp.update_ghost_values();
+
+            FECellIntegrator integrator(matrix_free);
+
+            for (unsigned int cell = 0; cell < matrix_free.n_cell_batches();
+                 ++cell)
+              {
+                integrator.reinit(cell);
+                integrator.read_dof_values(temp);
+
+                for (unsigned int i = 0; i < integrator.dofs_per_cell; ++i)
+                  if ((integrator.begin_dof_values()[i] ==
+                       VectorizedArray<Number>()) == false)
+                    {
+                      edge_constrained_cell[cell] = true;
+                      break;
+                    }
+              }
+
+
+#ifdef DEBUG
+            unsigned int count = 0;
+            for (const auto i : edge_constrained_cell)
+              if (i)
+                count++;
+
+            const unsigned int count_global =
+              Utilities::MPI::sum(count, dof_handler.get_communicator());
+
+            const unsigned int count_cells_global =
+              Utilities::MPI::sum(matrix_free.n_cell_batches(),
+                                  dof_handler.get_communicator());
+
+            if (Utilities::MPI::this_mpi_process(
+                  dof_handler.get_communicator()) == 0)
+              std::cout << count_global << " " << count_cells_global
+                        << std::endl;
+#endif
+          }
       }
   }
 
@@ -174,7 +224,7 @@ public:
 
     // do loop
     this->matrix_free.cell_loop(
-      &Operator::do_cell_integral_range, this, dst, src, true);
+      &Operator::do_cell_integral_range<true>, this, dst, src, true);
 
     // make a copy of dst and zero out everything except edge_constraints
     VectorType dst_copy(dst);
@@ -207,7 +257,7 @@ public:
 
     // do loop with copy of src
     this->matrix_free.cell_loop(
-      &Operator::do_cell_integral_range, this, dst, src_cpy, false);
+      &Operator::do_cell_integral_range<true>, this, dst, src_cpy, false);
   }
 
   void
@@ -456,6 +506,7 @@ private:
     integrator.integrate_scatter(EvaluationFlags::gradients, dst);
   }
 
+  template <bool apply_edge_optimization = false>
   void
   do_cell_integral_range(
     const MatrixFree<dim, number> &              matrix_free,
@@ -467,6 +518,9 @@ private:
 
     for (unsigned cell = range.first; cell < range.second; ++cell)
       {
+        if (apply_edge_optimization && (edge_constrained_cell[cell] == false))
+          continue;
+
         integrator.reinit(cell);
 
         do_cell_integral_global(integrator, dst, src);
@@ -514,4 +568,6 @@ private:
    * @note Needed in matrix-free vmults.
    */
   mutable std::vector<std::pair<number, number>> edge_constrained_values;
+
+  std::vector<bool> edge_constrained_cell;
 };
