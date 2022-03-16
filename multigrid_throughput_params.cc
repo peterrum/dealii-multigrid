@@ -853,8 +853,17 @@ mg_solve(SolverControl &                              solver_control,
                                              VectorType,
                                              SmootherPreconditionerType>;
 
-  // Initialize level operators.
+// Initialize level operators.
+#if false
   mg::Matrix<VectorType> mg_matrix(mg_matrices);
+#else
+  MGLevelObject<MatrixFreeOperators::MGInterfaceOperator<LevelMatrixType>>
+    mg_matrix_levels;
+  mg_matrix_levels.resize(min_level, max_level);
+  for (unsigned int level = min_level; level <= max_level; level++)
+    mg_matrix_levels[level].initialize(mg_matrices[level]);
+  mg::Matrix<VectorType> mg_matrix(mg_matrix_levels);
+#endif
 
   // Initialize smoothers.
   MGLevelObject<typename SmootherType::AdditionalData> smoother_data(min_level,
@@ -1095,7 +1104,7 @@ mg_solve(SolverControl &                              solver_control,
                   MGTransferTypeCoarse,
                   MGTransferGlobalCoarsening<dim, VectorType>>::value)
     if (dof_fine.get_triangulation().has_hanging_nodes())
-      mg_intermediate.set_edge_matrices(mg_interface, mg_interface);
+      mg_intermediate.set_edge_in_matrix(mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeCoarse> preconditioner_mg(
     dof_intermediate, mg_intermediate, mg_transfer_intermediate);
@@ -1120,7 +1129,7 @@ mg_solve(SolverControl &                              solver_control,
                   MGTransferTypeFine,
                   MGTransferGlobalCoarsening<dim, VectorType>>::value)
     if (dof_fine.get_triangulation().has_hanging_nodes())
-      mg_fine.set_edge_matrices(mg_interface, mg_interface);
+      mg_fine.set_edge_in_matrix(mg_interface);
 
   PreconditionMG<dim, VectorType, MGTransferTypeFine> preconditioner(
     dof_fine, mg_fine, mg_transfer_fine);
