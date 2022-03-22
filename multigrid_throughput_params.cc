@@ -1,5 +1,3 @@
-
-
 #include <deal.II/base/conditional_ostream.h>
 #include <deal.II/base/convergence_table.h>
 #include <deal.II/base/logstream.h>
