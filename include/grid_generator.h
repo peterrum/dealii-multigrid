@@ -1,33 +1,5 @@
-
 namespace dealii::GridGenerator
 {
-  template <int dim>
-  void
-  create_point(Triangulation<dim> &tria, const unsigned int n_refinements)
-  {
-    GridGenerator::hyper_cube(tria, 0.0, 1.0);
-
-    for (int i = 0; i < std::min(static_cast<int>(n_refinements), 3); i++)
-      tria.refine_global(1);
-
-    for (unsigned int i = 3; i < n_refinements; i++)
-      {
-        for (auto cell : tria.active_cell_iterators())
-          if (cell->is_locally_owned())
-            {
-              for (unsigned int i = 0; i < GeometryInfo<dim>::vertices_per_cell;
-                   i++)
-                if (cell->vertex(i).norm() < 1e-8)
-                  cell->set_refine_flag();
-            }
-        tria.execute_coarsening_and_refinement();
-      }
-
-    AssertDimension(tria.n_global_levels() - 1, n_refinements);
-  }
-
-
-
   template <int dim>
   void
   create_circle(Triangulation<dim> &tria, const unsigned int n_refinements)
@@ -96,9 +68,9 @@ namespace dealii::GridGenerator
 
   template <int dim>
   void
-  create_quadrant_(Triangulation<dim> &tria,
-                   const unsigned int  n_ref_global,
-                   const unsigned int  n_ref_local)
+  create_quadrant_flexible(Triangulation<dim> &tria,
+                           const unsigned int  n_ref_global,
+                           const unsigned int  n_ref_local)
   {
     GridGenerator::hyper_cube(tria, -1.0, +1.0);
     tria.refine_global(n_ref_global);
