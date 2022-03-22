@@ -52,6 +52,10 @@ def main():
     counter = 0
 
     for n_refinements in range(3,20):
+        # global coarsening (linerar -> coarse grid)
+        run_instance(counter, simulation, n_refinements, 1, "HMG-global")
+        counter = counter + 1;
+
         # local smoothing
         run_instance(counter, simulation, n_refinements, k, "HMG-local")
         counter = counter + 1;

@@ -20,7 +20,7 @@ cd ..
 mkdir small-scaling-quadrant
 cd small-scaling-quadrant
 python ../../dealii-multigrid/scripts/small-scaling.py quadrant
-sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0001.cmd
+sbatch --time=2:00:00 ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0001.cmd
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
 cd ..
 ```
@@ -98,12 +98,14 @@ mkdir -p large-scaling-quadrant-1-gc-fcp
 cd large-scaling-quadrant-1-gc-fcp
 python ../../dealii-multigrid/scripts/large_scaling_partitioning.py quadrant 1
 python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
+for cmd in *.cmd; do sbatch $cmd; done
 cd ..
 
 mkdir -p large-scaling-quadrant-4-gc-fcp
 cd large-scaling-quadrant-4-gc-fcp
 python ../../dealii-multigrid/scripts/large_scaling_partitioning.py quadrant 4
 python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
+for cmd in *.cmd; do sbatch $cmd; done
 cd ..
 ```
 
@@ -114,12 +116,14 @@ mkdir -p large-scaling-annulus-1-gc-fcp
 cd large-scaling-annulus-1-gc-fcp
 python ../../dealii-multigrid/scripts/large_scaling_partitioning.py annulus 1
 python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
+for cmd in *.cmd; do sbatch $cmd; done
 cd ..
 
 mkdir -p large-scaling-annulus-4-gc-fcp
 cd large-scaling-annulus-4-gc-fcp
 python ../../dealii-multigrid/scripts/large_scaling_partitioning.py annulus 4
 python ../../dealii-multigrid/experiments-skx/large-scaling-create-job-files.py 512
+for cmd in *.cmd; do sbatch $cmd; done
 cd ..
 ```
 
