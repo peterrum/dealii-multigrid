@@ -378,7 +378,7 @@ public:
             for (unsigned int q = 0; q < phi.n_q_points; ++q)
               if constexpr (n_components == 1)
                 {
-                  VectorizedArray<number> coeff;
+                  VectorizedArray<number> coeff = 0;
 
                   const auto point_batch = phi.quadrature_point(q);
 
