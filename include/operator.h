@@ -216,23 +216,13 @@ public:
   void
   vmult_interface_down(VectorType &dst, VectorType const &src) const
   {
-    if (has_edge_constrained_indices == false)
-      {
-        dst = Number(0.);
-        return;
-      }
-
-    // do loop
     this->matrix_free.cell_loop(
-      &Operator::do_cell_integral_range<true>, this, dst, src, true);
+      &Operator::do_cell_integral_range, this, dst, src, true);
 
-    // make a copy of dst and zero out everything except edge_constraints
-    VectorType dst_copy(dst);
-    dst = 0.0;
-
-    for (unsigned int i = 0; i < edge_constrained_indices.size(); ++i)
-      dst.local_element(edge_constrained_indices[i]) =
-        dst_copy.local_element(edge_constrained_indices[i]);
+    // set constrained dofs as the sum of current dst value and src value
+    for (unsigned int i = 0; i < constrained_indices.size(); ++i)
+      dst.local_element(constrained_indices[i]) =
+        src.local_element(constrained_indices[i]);
   }
 
   void
