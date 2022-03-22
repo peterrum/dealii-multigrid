@@ -10,31 +10,27 @@ for cmd in *.cmd; do sbatch $cmd; done
 ### Small scale
 
 ```bash
-mkdir small-scaling-annulus
+mkdir -p small-scaling-annulus
 cd small-scaling-annulus
 python ../../dealii-multigrid/scripts/small-scaling.py annulus
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0001.cmd
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0192.cmd
 cd ..
 
-mkdir small-scaling-quadrant
+mkdir -p small-scaling-quadrant
 cd small-scaling-quadrant
 python ../../dealii-multigrid/scripts/small-scaling.py quadrant
 sbatch --time=2:00:00 ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0001.cmd
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
 cd ..
-```
 
-```bash
-mkdir small-scaling-hypercube
+mkdir -p small-scaling-hypercube
 cd small-scaling-hypercube
 python ../../dealii-multigrid/scripts/small-scaling-hypercube.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
-```
 
-```bash
-mkdir small-scaling-gaussian
+mkdir -p small-scaling-gaussian
 cd small-scaling-gaussian
 python ../../dealii-multigrid/scripts/small-scaling-gaussian.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
@@ -78,13 +74,13 @@ cd ..
 ### Small scale
 
 ```bash
-mkdir small-scaling-gc-fcp-annulus
+mkdir -p small-scaling-gc-fcp-annulus
 cd small-scaling-gc-fcp-annulus
 python ../../dealii-multigrid/scripts/small-scaling.py annulus FirstChildPolicy-2.0
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-annulus-0192.cmd
 cd ..
 
-mkdir small-scaling-gc-fcp-quadrant
+mkdir -p small-scaling-gc-fcp-quadrant
 cd small-scaling-gc-fcp-quadrant
 python ../../dealii-multigrid/scripts/small-scaling.py quadrant FirstChildPolicy-2.0
 sbatch ../../dealii-multigrid/experiments-skx/small-scaling-quadrant-0192.cmd
@@ -141,25 +137,25 @@ cd ..
 # Appendix to Section 5
 
 ```bash
-mkdir parameters-smoother-degree
+mkdir -p parameters-smoother-degree
 cd parameters-smoother-degree
 python ../../dealii-multigrid/scripts/parameters_smoother_degree.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
 
-mkdir parameters-mgnumber
+mkdir -p parameters-mgnumber
 cd parameters-mgnumber
 python ../../dealii-multigrid/scripts/parameters_mgnumber.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
 
-mkdir parameters-tolerance
+mkdir -p parameters-tolerance
 cd parameters-tolerance
 python ../../dealii-multigrid/scripts/parameters_tolerance.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
 cd ..
 
-mkdir parameters-weights
+mkdir -p parameters-weights
 cd parameters-weights
 python ../../dealii-multigrid/scripts/parameters_weights.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
@@ -170,7 +166,7 @@ cd ..
 # Appendix to Section 6
 
 ```bash
-mkdir parameters-hp-amg
+mkdir -p parameters-hp-amg
 cd parameters-hp-amg
 python ../../dealii-multigrid/scripts/parameters_hp_amg.py
 sbatch ../../dealii-multigrid/experiments-skx/parameters-0768.cmd
