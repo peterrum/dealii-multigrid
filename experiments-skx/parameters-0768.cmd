@@ -46,6 +46,6 @@ module load intel-mpi/2019-gcc
 pwd
 
 array=($(ls input_*.json));
-mpirun -np 768 ../multigrid_throughput_params "${array[@]}"
+mpirun -np 768 ../multigrid_throughput "${array[@]}"
 
 

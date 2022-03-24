@@ -50,7 +50,7 @@ module load intel-mpi/2019-gcc
 pwd
 
 array=($(ls *.json))
-mpirun -np {3} ../multigrid_throughput_params \"${{array[@]}}\"
+mpirun -np {3} ../multigrid_throughput \"${{array[@]}}\"
 """
 
 def main():

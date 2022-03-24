@@ -1,5 +1,3 @@
-
-
 #include <deal.II/base/conditional_ostream.h>
 #include <deal.II/base/convergence_table.h>
 #include <deal.II/base/logstream.h>
@@ -2044,7 +2042,7 @@ run(const RunParameters &params, ConvergenceTable &table)
       parallel::distributed::Triangulation<dim>::construct_multigrid_hierarchy);
 
   if (geometry_type == "quadrant_flexible")
-    GridGenerator::create_quadrant_(tria, n_ref_global, n_ref_local);
+    GridGenerator::create_quadrant_flexible(tria, n_ref_global, n_ref_local);
   else if (geometry_type == "quadrant")
     GridGenerator::create_quadrant(tria, n_ref_global);
   else if (geometry_type == "circle")

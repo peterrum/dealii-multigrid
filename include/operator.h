@@ -7,31 +7,6 @@
 
 using namespace dealii;
 
-namespace
-{
-  template <int dim, typename number, typename VectorizedArrayType>
-  IndexSet
-  get_refinement_edges(
-    const MatrixFree<dim, number, VectorizedArrayType> &matrix_free)
-  {
-    const unsigned int level = matrix_free.get_mg_level();
-
-    std::vector<IndexSet> refinement_edge_indices;
-    refinement_edge_indices.clear();
-    const unsigned int nlevels =
-      matrix_free.get_dof_handler().get_triangulation().n_global_levels();
-    refinement_edge_indices.resize(nlevels);
-    for (unsigned int l = 0; l < nlevels; l++)
-      refinement_edge_indices[l] =
-        IndexSet(matrix_free.get_dof_handler().n_dofs(l));
-
-    MGTools::extract_inner_interface_dofs(matrix_free.get_dof_handler(),
-                                          refinement_edge_indices);
-    return refinement_edge_indices[level];
-  }
-} // namespace
-
-
 
 template <int dim_, int n_components, typename Number>
 class Operator : public Subscriptor
@@ -403,7 +378,7 @@ public:
             for (unsigned int q = 0; q < phi.n_q_points; ++q)
               if constexpr (n_components == 1)
                 {
-                  VectorizedArray<number> coeff;
+                  VectorizedArray<number> coeff = 0;
 
                   const auto point_batch = phi.quadrature_point(q);
 
@@ -560,4 +535,23 @@ private:
   mutable std::vector<std::pair<number, number>> edge_constrained_values;
 
   std::vector<bool> edge_constrained_cell;
+
+  static IndexSet
+  get_refinement_edges(const MatrixFree<dim, number> &matrix_free)
+  {
+    const unsigned int level = matrix_free.get_mg_level();
+
+    std::vector<IndexSet> refinement_edge_indices;
+    refinement_edge_indices.clear();
+    const unsigned int nlevels =
+      matrix_free.get_dof_handler().get_triangulation().n_global_levels();
+    refinement_edge_indices.resize(nlevels);
+    for (unsigned int l = 0; l < nlevels; l++)
+      refinement_edge_indices[l] =
+        IndexSet(matrix_free.get_dof_handler().n_dofs(l));
+
+    MGTools::extract_inner_interface_dofs(matrix_free.get_dof_handler(),
+                                          refinement_edge_indices);
+    return refinement_edge_indices[level];
+  }
 };
