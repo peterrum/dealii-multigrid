@@ -281,13 +281,14 @@ namespace dealii::parallel
                           const double                 weight)
   {
     return [&helper, weight](const auto &cell, const auto &) -> unsigned int {
+      const unsigned int base_weight = 1000;
       if (cell->is_active() == false || cell->is_locally_owned() == false)
-        return 10000;
+        return base_weight + 10000;
 
       if (helper.is_constrained(cell))
-        return 10000 * weight;
+        return base_weight + 10000 * weight;
       else
-        return 10000;
+        return base_weight + 10000;
     };
   }
 
@@ -2142,7 +2143,7 @@ run(const RunParameters &params, ConvergenceTable &table)
         {
           const auto weight_function = parallel::hanging_nodes_weighting<dim>(
             helper, atof(get_parameters(policy_name)[1].c_str()));
-          tria.signals.cell_weight.connect(weight_function);
+          tria.signals.weight.connect(weight_function);
           tria.repartition();
 
           policy =
@@ -2156,7 +2157,7 @@ run(const RunParameters &params, ConvergenceTable &table)
               const auto weight_function =
                 parallel::hanging_nodes_weighting<dim>(
                   helper, atof(get_parameters(policy_name)[1].c_str()));
-              tria.signals.cell_weight.connect(weight_function);
+              tria.signals.weight.connect(weight_function);
               tria.repartition();
             }
 
