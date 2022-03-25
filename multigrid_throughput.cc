@@ -281,14 +281,13 @@ namespace dealii::parallel
                           const double                 weight)
   {
     return [&helper, weight](const auto &cell, const auto &) -> unsigned int {
-      const unsigned int base_weight = 1000;
       if (cell->is_active() == false || cell->is_locally_owned() == false)
-        return base_weight + 10000;
+        return 10000;
 
       if (helper.is_constrained(cell))
-        return base_weight + 10000 * weight;
+        return 10000 * weight;
       else
-        return base_weight + 10000;
+        return 10000;
     };
   }
 
