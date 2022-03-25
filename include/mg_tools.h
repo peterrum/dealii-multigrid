@@ -435,8 +435,9 @@ namespace dealii::MGTools
                                                       cells_remote_sum.end(),
                                                       0);
 
-          const double horizontal_eff = static_cast<double>(n_cells_local) /
-                                        (n_cells_local + n_cells_remote);
+          const double horizontal_eff =
+            static_cast<double>(n_cells_local + n_cells_remote / 2) /
+            (n_cells_local + n_cells_remote);
 
           result.emplace_back("horizontal_eff", horizontal_eff);
 
