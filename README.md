@@ -12,7 +12,8 @@ It leverages on the infrastructure of deal.II and is the basis of the publicatio
 @article{munch2022gc,
   title         = {Efficient distributed matrix-free multigrid methods on locally refined 
                    meshes for FEM computations},
-  author        = {Munch, Peter and Heister, Timo and Prieto Saavedra, Laura and Kronbichler, Martin},
+  author        = {Munch, Peter and Heister, Timo and Prieto Saavedra, Laura and 
+                   Kronbichler, Martin},
   year          = {2022},
   archivePrefix = {arXiv:2203.12292},
 }
