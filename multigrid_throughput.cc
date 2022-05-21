@@ -2142,7 +2142,7 @@ run(const RunParameters &params, ConvergenceTable &table)
         {
           const auto weight_function = parallel::hanging_nodes_weighting<dim>(
             helper, atof(get_parameters(policy_name)[1].c_str()));
-          tria.signals.cell_weight.connect(weight_function);
+          tria.signals.weight.connect(weight_function);
           tria.repartition();
 
           policy =
@@ -2156,7 +2156,7 @@ run(const RunParameters &params, ConvergenceTable &table)
               const auto weight_function =
                 parallel::hanging_nodes_weighting<dim>(
                   helper, atof(get_parameters(policy_name)[1].c_str()));
-              tria.signals.cell_weight.connect(weight_function);
+              tria.signals.weight.connect(weight_function);
               tria.repartition();
             }
 
