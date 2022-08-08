@@ -1,0 +1,3 @@
+[submodule "mantle-convection/aspect"]
+	path = mantle-convection/aspect
+	url = https://github.com/tjhei/aspect.git
