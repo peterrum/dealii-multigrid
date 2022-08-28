@@ -1883,6 +1883,10 @@ solve_with_amg(const std::string &        type,
                const VectorType &         src,
                ConvergenceTable &         table)
 {
+  (void)type;
+  (void)op;
+  (void)dst;
+
   ReductionControl solver_control(mg_data.do_parameter_study ?
                                     mg_data.cg_parameter_study.maxiter :
                                     mg_data.cg_normal.maxiter,
