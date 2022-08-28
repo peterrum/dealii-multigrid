@@ -75,6 +75,6 @@ mpirun -np 40 ../multigrid_throughput "${array[@]}"
 cd ../..
 ```
 
-This experiment runs, as an example, simulations on the octant mesh for different refinement levels. For each refinement level, the simulations are run for `LS, p=1`, `GC, p=1`, `LS, p=4`, and GC, p=4`. 
+This experiment runs, as an example, simulations on the octant mesh for different refinement levels. For each refinement level, the simulations are run for `LS, p=1`, `GC, p=1`, `LS, p=4`, and `GC, p=4`. 
 
-All experiments we have run are documented in the folder [experiments-skx](https://github.com/peterrum/dealii-multigrid/tree/master/experiments-skx).
+All experiments we have run on SuperMUC-NG are documented in the folder [experiments-skx](https://github.com/peterrum/dealii-multigrid/tree/master/experiments-skx). The Stokes experiments are documented in the folder [mantle-convection](https://github.com/peterrum/dealii-multigrid/tree/master/mantle-convection).
