@@ -2,7 +2,7 @@
 
 ## Setup
 
-Please install deal.II with MPI, p4est, and Trilinos. We used revision [f07477f502](https://github.com/dealii/dealii/commit/f07477f502) but 9.4 or a recent master should also work.
+Please install deal.II with MPI, p4est, and Trilinos. We used v9.4.0 but a recent master should also work.
 
 Then configure and compile ASPECT from the branch chosen in the git submodule in this directory.
 
