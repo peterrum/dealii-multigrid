@@ -3,6 +3,7 @@
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/mpi.h>
 #include <deal.II/base/mpi.templates.h>
+#include <deal.II/base/parameter_handler.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/timer.h>
 
@@ -1666,6 +1667,225 @@ solve_with_global_coarsening(
 }
 
 
+template <typename LEVEL_NUMBER_TYPE,
+          int dim,
+          int n_components,
+          typename Number>
+void
+solve_with_global_coarsening_non_nested(
+  const std::string &                                           type,
+  const std::vector<std::shared_ptr<const Triangulation<dim>>> &triangulations,
+  const DoFHandler<dim> &                                       dof_handler_in,
+  const MultigridParameters &                                   mg_data,
+  const Operator<dim, n_components, Number> &                   op,
+  typename Operator<dim, n_components, Number>::VectorType &    dst,
+  const typename Operator<dim, n_components, Number>::VectorType &src,
+  const bool                                                      verbose,
+  ConvergenceTable &                                              table)
+{
+  const auto comm     = dof_handler_in.get_communicator();
+  auto       sub_comm = comm;
+
+  monitor("solve_with_global_coarsening_non_nested::0");
+
+  {
+    unsigned int cell_counter = 0;
+
+    for (const auto &cell : triangulations[0]->active_cell_iterators())
+      if (cell->is_locally_owned())
+        cell_counter++;
+
+    const unsigned int rank = Utilities::MPI::this_mpi_process(comm);
+
+#if DEBUG
+    const auto t = Utilities::MPI::gather(comm, cell_counter);
+
+    if (rank == 0)
+      {
+        for (const auto tt : t)
+          std::cout << tt << " ";
+        std::cout << std::endl;
+      }
+#endif
+
+    const int temp = cell_counter == 0 ? -1 : rank;
+
+    const unsigned int max_rank = Utilities::MPI::max(temp, comm);
+
+    table.add_value("sub_comm_size", max_rank + 1);
+
+    if (max_rank != Utilities::MPI::n_mpi_processes(comm) - 1)
+      {
+        const bool color = rank <= max_rank;
+        MPI_Comm_split(comm, color, rank, &sub_comm);
+
+        if (color == false)
+          {
+            MPI_Comm_free(&sub_comm);
+            sub_comm = MPI_COMM_NULL;
+          }
+      }
+  }
+
+  {
+    monitor("solve_with_global_coarsening_non_nested::1");
+
+    const auto level_degrees =
+      MGTransferGlobalCoarseningTools::create_polynomial_coarsening_sequence(
+        dof_handler_in.get_fe().degree,
+        MGTransferGlobalCoarseningTools::PolynomialCoarseningSequenceType::
+          bisect);
+
+    const unsigned int min_level = 0;
+    const unsigned int max_level = [&]() -> unsigned int {
+      if (type == "PMG")
+        return level_degrees.size() - 1;
+      else if (type == "HMG-global")
+        return triangulations.size() - 1;
+      else if (type == "HPMG")
+        return level_degrees.size() + triangulations.size() - 2;
+
+      AssertThrow(false, ExcNotImplemented());
+
+      return 0;
+    }();
+
+    using LevelOperatorType = Operator<dim, n_components, LEVEL_NUMBER_TYPE>;
+
+    MGLevelObject<DoFHandler<dim>> dof_handlers(min_level, max_level);
+    MGLevelObject<AffineConstraints<typename LevelOperatorType::value_type>>
+                                  constraints(min_level, max_level);
+    MGLevelObject<MappingQ1<dim>> mappings(min_level, max_level);
+    MGLevelObject<
+      MGTwoLevelTransferNonNested<dim, typename LevelOperatorType::VectorType>>
+                                     transfers(min_level, max_level);
+    MGLevelObject<LevelOperatorType> operators(min_level, max_level);
+
+    MappingQ1<dim> mapping;
+
+    monitor("solve_with_global_coarsening_non_nested::2");
+
+    for (auto l = min_level; l <= max_level; ++l)
+      {
+        auto &dof_handler = dof_handlers[l];
+        auto &constraint  = constraints[l];
+        auto &op          = operators[l];
+
+        const auto degree = [&]() -> unsigned int {
+          if (type == "HMG-global")
+            return level_degrees.back();
+          else
+            AssertThrow(false, ExcNotImplemented());
+
+          return 0;
+        }();
+
+        const FESystem<dim> fe(FE_Q<dim>{degree},
+                               dof_handler_in.get_fe().n_components());
+        const QGauss<dim>   quad(fe.degree + 1);
+
+        const auto &tria = [&]() -> const Triangulation<dim> & {
+          if (type == "HMG-global")
+            return *triangulations[l];
+          else
+            AssertThrow(false, ExcNotImplemented());
+
+          return *triangulations.back();
+        }();
+
+        dof_handler.reinit(tria);
+        dof_handler.distribute_dofs(fe);
+
+        IndexSet locally_relevant_dofs;
+        DoFTools::extract_locally_relevant_dofs(dof_handler,
+                                                locally_relevant_dofs);
+        constraint.reinit(locally_relevant_dofs);
+        VectorTools::interpolate_boundary_values(
+          mapping,
+          dof_handler,
+          0,
+          Functions::ZeroFunction<dim, typename LevelOperatorType::value_type>(
+            dof_handler_in.get_fe().n_components()),
+          constraint);
+        DoFTools::make_hanging_node_constraints(dof_handler, constraint);
+        constraint.close();
+
+        op.reinit(mapping, dof_handler, quad, constraint);
+      }
+
+    monitor("solve_with_global_coarsening_non_nested::3");
+
+    for (unsigned int l = min_level; l < max_level; ++l)
+      transfers[l + 1].reinit(dof_handlers[l + 1],
+                              dof_handlers[l],
+                              mappings[l + 1],
+                              mappings[l],
+                              constraints[l + 1],
+                              constraints[l]);
+
+    ConvergenceTable table_;
+    for (unsigned int l = min_level; l <= max_level; ++l)
+      {
+        table_.add_value(
+          "cells", dof_handlers[l].get_triangulation().n_global_active_cells());
+        table_.add_value("dofs", dof_handlers[l].n_dofs());
+      }
+
+    if (verbose && Utilities::MPI::this_mpi_process(
+                     dof_handler_in.get_communicator()) == 0)
+      table_.write_text(std::cout);
+
+    MGTransferGlobalCoarsening<dim, typename LevelOperatorType::VectorType>
+      transfer(transfers, [&](const auto l, auto &vec) {
+        operators[l].initialize_dof_vector(vec);
+      });
+
+    monitor("solve_with_global_coarsening_non_nested::4");
+
+    ReductionControl solver_control(mg_data.do_parameter_study ?
+                                      mg_data.cg_parameter_study.maxiter :
+                                      mg_data.cg_normal.maxiter,
+                                    mg_data.do_parameter_study ?
+                                      mg_data.cg_parameter_study.abstol :
+                                      mg_data.cg_normal.abstol,
+                                    mg_data.do_parameter_study ?
+                                      mg_data.cg_parameter_study.reltol :
+                                      mg_data.cg_normal.reltol,
+                                    false,
+                                    false);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    mg_solve(solver_control,
+             dst,
+             src,
+             mg_data,
+             dof_handler_in,
+             op,
+             operators,
+             transfer,
+             verbose,
+             sub_comm,
+             table);
+
+    monitor("solve_with_global_coarsening_non_nested::5");
+  }
+
+  if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
+    MPI_Comm_free(&sub_comm);
+
+  if (verbose)
+    {
+      const auto stats = MGTools::print_multigrid_statistics(triangulations);
+      for (const auto &stat : stats)
+        {
+          table.add_value(stat.first, stat.second);
+          table.set_scientific(stat.first, true);
+        }
+    }
+}
+
+
 
 template <typename LEVEL_NUMBER_TYPE,
           int dim,
@@ -2336,7 +2556,28 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   if (type == "AMG" || type == "AMGPETSc")
     solve_with_amg(type, mg_data, op, solution, rhs, table);
-  else if (type == "PMG" || type == "HMG-global" || type == "HPMG")
+  else if (type == "HMG-global")
+    {
+      solve_with_global_coarsening<LEVEL_NUMBER_TYPE>(type,
+                                                      triangulations,
+                                                      dof_handler,
+                                                      mg_data,
+                                                      op,
+                                                      solution,
+                                                      rhs,
+                                                      verbose,
+                                                      table);
+      // solve_with_global_coarsening_non_nested<LEVEL_NUMBER_TYPE>(type,
+      //                                                            triangulations,
+      //                                                            dof_handler,
+      //                                                            mg_data,
+      //                                                            op,
+      //                                                            solution,
+      //                                                            rhs,
+      //                                                            verbose,
+      //                                                            table);
+    }
+  else if (type == "PMG" || type == "HPMG")
     solve_with_global_coarsening<LEVEL_NUMBER_TYPE>(type,
                                                     triangulations,
                                                     dof_handler,
