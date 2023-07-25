@@ -3,6 +3,7 @@
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/mpi.h>
 #include <deal.II/base/mpi.templates.h>
+#include <deal.II/base/parameter_handler.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/timer.h>
 
@@ -69,7 +70,8 @@ public:
   {}
 
   double
-  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  value(dealii::Point<dim> const &p,
+        unsigned int const /*component*/ = 0) const override
   {
     double return_value = 0;
 
@@ -101,7 +103,8 @@ public:
   {}
 
   double
-  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  value(dealii::Point<dim> const &p,
+        unsigned int const /*component*/ = 0) const override
   {
     double const coef         = 1.0;
     double       return_value = 0;
@@ -1666,6 +1669,224 @@ solve_with_global_coarsening(
 }
 
 
+template <typename LEVEL_NUMBER_TYPE,
+          int dim,
+          int n_components,
+          typename Number>
+void
+solve_with_global_coarsening_non_nested(
+  const std::string &                                           type,
+  const std::vector<std::shared_ptr<const Triangulation<dim>>> &triangulations,
+  const DoFHandler<dim> &                                       dof_handler_in,
+  const MultigridParameters &                                   mg_data,
+  const Operator<dim, n_components, Number> &                   op,
+  typename Operator<dim, n_components, Number>::VectorType &    dst,
+  const typename Operator<dim, n_components, Number>::VectorType &src,
+  const bool                                                      verbose,
+  ConvergenceTable &                                              table)
+{
+  const auto comm     = dof_handler_in.get_communicator();
+  auto       sub_comm = comm;
+
+  monitor("solve_with_global_coarsening_non_nested::0");
+
+  {
+    unsigned int cell_counter = 0;
+
+    for (const auto &cell : triangulations[0]->active_cell_iterators())
+      if (cell->is_locally_owned())
+        cell_counter++;
+
+    const unsigned int rank = Utilities::MPI::this_mpi_process(comm);
+
+#if DEBUG
+    const auto t = Utilities::MPI::gather(comm, cell_counter);
+
+    if (rank == 0)
+      {
+        for (const auto tt : t)
+          std::cout << tt << " ";
+        std::cout << std::endl;
+      }
+#endif
+
+    const int temp = cell_counter == 0 ? -1 : rank;
+
+    const unsigned int max_rank = Utilities::MPI::max(temp, comm);
+
+    table.add_value("sub_comm_size", max_rank + 1);
+
+    if (max_rank != Utilities::MPI::n_mpi_processes(comm) - 1)
+      {
+        const bool color = rank <= max_rank;
+        MPI_Comm_split(comm, color, rank, &sub_comm);
+
+        if (color == false)
+          {
+            MPI_Comm_free(&sub_comm);
+            sub_comm = MPI_COMM_NULL;
+          }
+      }
+  }
+
+  {
+    monitor("solve_with_global_coarsening_non_nested::1");
+
+    const auto level_degrees =
+      MGTransferGlobalCoarseningTools::create_polynomial_coarsening_sequence(
+        dof_handler_in.get_fe().degree,
+        MGTransferGlobalCoarseningTools::PolynomialCoarseningSequenceType::
+          bisect);
+
+    const unsigned int min_level = 0;
+    const unsigned int max_level = [&]() -> unsigned int {
+      if (type == "HMG-NN")
+        return triangulations.size() - 1;
+      else
+        AssertThrow(false, ExcNotImplemented());
+
+      return 0;
+    }();
+
+    using LevelOperatorType = Operator<dim, n_components, LEVEL_NUMBER_TYPE>;
+
+    MGLevelObject<DoFHandler<dim>> dof_handlers(min_level, max_level);
+    MGLevelObject<AffineConstraints<typename LevelOperatorType::value_type>>
+                                  constraints(min_level, max_level);
+    MGLevelObject<MappingQ1<dim>> mappings(min_level, max_level);
+    MGLevelObject<
+      MGTwoLevelTransferNonNested<dim, typename LevelOperatorType::VectorType>>
+                                     transfers(min_level, max_level);
+    MGLevelObject<LevelOperatorType> operators(min_level, max_level);
+
+    MappingQ1<dim> mapping;
+
+    monitor("solve_with_global_coarsening_non_nested::2");
+
+    for (auto l = min_level; l <= max_level; ++l)
+      {
+        auto &dof_handler = dof_handlers[l];
+        auto &constraint  = constraints[l];
+        auto &op          = operators[l];
+
+        const auto degree = [&]() -> unsigned int {
+          if (type == "HMG-NN")
+            return level_degrees.back();
+          else
+            AssertThrow(false, ExcNotImplemented());
+
+          return 0;
+        }();
+
+        FE_Q<dim> fe{degree};
+        // const FESystem<dim> fe(FE_Q<dim>{degree},
+        //                        dof_handler_in.get_fe().n_components());
+        const QGauss<dim> quad(fe.degree + 1);
+
+        const auto &tria = [&]() -> const Triangulation<dim> & {
+          if (type == "HMG-NN")
+            return *triangulations[l];
+          else
+            AssertThrow(false, ExcNotImplemented());
+
+          return *triangulations.back();
+        }();
+
+        dof_handler.reinit(tria);
+        dof_handler.distribute_dofs(fe);
+
+        IndexSet locally_relevant_dofs;
+        DoFTools::extract_locally_relevant_dofs(dof_handler,
+                                                locally_relevant_dofs);
+        constraint.reinit(locally_relevant_dofs);
+        VectorTools::interpolate_boundary_values(
+          mapping,
+          dof_handler,
+          0,
+          Functions::ZeroFunction<dim, typename LevelOperatorType::value_type>(
+            dof_handler_in.get_fe().n_components()),
+          constraint);
+        DoFTools::make_hanging_node_constraints(dof_handler, constraint);
+        constraint.close();
+
+        op.reinit(mapping, dof_handler, quad, constraint);
+      }
+
+    monitor("solve_with_global_coarsening_non_nested::3");
+
+    for (unsigned int l = min_level; l < max_level; ++l)
+      {
+        transfers[l + 1].reinit(dof_handlers[l + 1],
+                                dof_handlers[l],
+                                mappings[l + 1],
+                                mappings[l],
+                                constraints[l + 1],
+                                constraints[l]);
+      }
+
+    ConvergenceTable table_;
+    for (unsigned int l = min_level; l <= max_level; ++l)
+      {
+        table_.add_value(
+          "cells", dof_handlers[l].get_triangulation().n_global_active_cells());
+        table_.add_value("dofs", dof_handlers[l].n_dofs());
+      }
+
+    if (verbose && Utilities::MPI::this_mpi_process(
+                     dof_handler_in.get_communicator()) == 0)
+      table_.write_text(std::cout);
+
+    MGTransferGlobalCoarsening<dim, typename LevelOperatorType::VectorType>
+      transfer(transfers, [&](const auto l, auto &vec) {
+        operators[l].initialize_dof_vector(vec);
+      });
+
+    monitor("solve_with_global_coarsening_non_nested::4");
+
+    ReductionControl solver_control(mg_data.do_parameter_study ?
+                                      mg_data.cg_parameter_study.maxiter :
+                                      mg_data.cg_normal.maxiter,
+                                    mg_data.do_parameter_study ?
+                                      mg_data.cg_parameter_study.abstol :
+                                      mg_data.cg_normal.abstol,
+                                    mg_data.do_parameter_study ?
+                                      mg_data.cg_parameter_study.reltol :
+                                      mg_data.cg_normal.reltol,
+                                    false,
+                                    false);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    mg_solve(solver_control,
+             dst,
+             src,
+             mg_data,
+             dof_handler_in,
+             op,
+             operators,
+             transfer,
+             verbose,
+             sub_comm,
+             table);
+
+    monitor("solve_with_global_coarsening_non_nested::5");
+  }
+
+  if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
+    MPI_Comm_free(&sub_comm);
+
+  if (verbose)
+    {
+      const auto stats = MGTools::print_multigrid_statistics(triangulations);
+      for (const auto &stat : stats)
+        {
+          table.add_value(stat.first, stat.second);
+          table.set_scientific(stat.first, true);
+        }
+    }
+}
+
+
 
 template <typename LEVEL_NUMBER_TYPE,
           int dim,
@@ -2336,19 +2557,33 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   if (type == "AMG" || type == "AMGPETSc")
     solve_with_amg(type, mg_data, op, solution, rhs, table);
-  else if (type == "PMG" || type == "HMG-global" || type == "HPMG")
-    solve_with_global_coarsening<LEVEL_NUMBER_TYPE>(type,
-                                                    triangulations,
-                                                    dof_handler,
-                                                    mg_data,
-                                                    op,
-                                                    solution,
-                                                    rhs,
-                                                    verbose,
-                                                    table);
+  else if (type == "HMG-global" || type == "PMG" || type == "HPMG")
+    {
+      solve_with_global_coarsening<LEVEL_NUMBER_TYPE>(type,
+                                                      triangulations,
+                                                      dof_handler,
+                                                      mg_data,
+                                                      op,
+                                                      solution,
+                                                      rhs,
+                                                      verbose,
+                                                      table);
+    }
   else if (type == "HMG-local" || type == "HPMG-local")
     solve_with_local_smoothing<LEVEL_NUMBER_TYPE>(
       type, dof_handler, mg_data, op, solution, rhs, verbose, table);
+  else if (type == "HMG-NN")
+    {
+      solve_with_global_coarsening_non_nested<LEVEL_NUMBER_TYPE>(type,
+                                                                 triangulations,
+                                                                 dof_handler,
+                                                                 mg_data,
+                                                                 op,
+                                                                 solution,
+                                                                 rhs,
+                                                                 verbose,
+                                                                 table);
+    }
   else
     AssertThrow(false, ExcNotImplemented());
 
@@ -2394,6 +2629,246 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   data_out.write_vtu_in_parallel("multigrid.vtu", MPI_COMM_WORLD);
 }
+
+
+
+// template <int dim,
+//           int n_components,
+//           typename Number = double,
+//           typename LEVEL_NUMBER_TYPE>
+// void
+// run_non_nested(const RunParameters &params, ConvergenceTable &table)
+// {
+//   const std::string  type            = params.type;
+//   const std::string  geometry_type   = params.geometry_type;
+//   const unsigned int n_ref_global    = params.n_ref_global;
+//   const unsigned int n_ref_local     = params.n_ref_local;
+//   const unsigned int fe_degree_fine  = params.fe_degree_fine;
+//   const bool         paraview        = params.paraview;
+//   const bool         verbose         = params.verbose;
+//   const unsigned int p               = params.p;
+//   std::string        policy_name     = params.policy_name;
+//   const std::string  simulation_type = params.simulation_type;
+
+//   using VectorType = LinearAlgebra::distributed::Vector<Number>;
+
+//   monitor("run::1");
+
+//   parallel::distributed::Triangulation<dim> tria(MPI_COMM_WORLD);
+
+//   if (geometry_type == "quadrant_flexible")
+//     GridGenerator::create_quadrant_flexible(tria, n_ref_global, n_ref_local);
+//   else if (geometry_type == "quadrant")
+//     GridGenerator::create_quadrant(tria, n_ref_global);
+//   else if (geometry_type == "circle")
+//     GridGenerator::create_circle(tria, n_ref_global);
+//   else if (geometry_type == "annulus")
+//     GridGenerator::create_annulus(tria, n_ref_global);
+//   else if (geometry_type == "hypercube")
+//     {
+//       GridGenerator::hyper_cube(tria, -1.0, +1.0);
+//       tria.refine_global(n_ref_global);
+//     }
+//   else
+//     AssertThrow(false, ExcNotImplemented());
+
+
+
+//   monitor("run::2-" + std::to_string(tria.n_global_active_cells()));
+
+
+
+//   types::global_cell_index n_cells_w_hn  = 0;
+//   types::global_cell_index n_cells_wo_hn = 0;
+
+//   for (const auto &cell : tria.active_cell_iterators())
+//     if (cell->is_locally_owned())
+//       {
+//         if (helper.is_constrained(cell))
+//           n_cells_w_hn++;
+//         else
+//           n_cells_wo_hn++;
+//       }
+
+//   n_cells_w_hn  = Utilities::MPI::sum(n_cells_w_hn, MPI_COMM_WORLD);
+//   n_cells_wo_hn = Utilities::MPI::sum(n_cells_wo_hn, MPI_COMM_WORLD);
+
+//   monitor("run::3");
+
+//   std::vector<std::shared_ptr<const Triangulation<dim>>> triangulations;
+//   for (unsigned int l = 0; l <= n_ref_global; ++l)
+//     {
+//               create_quadrant(triangulations, 2 * l);
+//     }
+
+//   if (type == "HMG-non-nested")
+//     {
+//       // triangulations =
+//       //
+//       MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
+//       //     tria, *policy, true /*=preserve_fine_triangulation*/, false);
+//     }
+//   else if (type == "AMG" || type == "AMGPETSc")
+//     {
+//       triangulations.emplace_back(&tria, [](auto *) {});
+//     }
+//   else
+//     {
+//       Assert(false, ExcMessage("Wrong type"));
+//     }
+
+//   if (triangulations.size() > 1)
+//     {
+//       // collect levels
+//       std::vector<std::shared_ptr<const Triangulation<dim>>> temp;
+
+//       // find first relevant coarse-grid triangulation
+//       auto ptr = std::find_if(
+//         triangulations.begin(),
+//         triangulations.end() - 1,
+//         [&params](const auto &tria) {
+//           if (params.min_level != -1) // minimum number of levels
+//             {
+//               if (params.min_level <=
+//               static_cast<int>(tria->n_global_levels()))
+//                 return true;
+//             }
+//           else if (params.min_n_cells != -1) // minimum number of cells
+//             {
+//               if (static_cast<int>(tria->n_global_active_cells()) >=
+//                   params.min_n_cells)
+//                 return true;
+//             }
+//           else
+//             {
+//               return true;
+//             }
+//           return false;
+//         });
+
+//       // consider all triangulations from that one
+//       while (ptr != triangulations.end())
+//         temp.push_back(*(ptr++));
+
+//       triangulations = temp;
+//     }
+
+//   DoFHandler<dim> dof_handler(*triangulations.back());
+
+//   AffineConstraints<Number>           constraint;
+//   Operator<dim, n_components, Number> op;
+
+//   MappingQ1<dim> mapping;
+
+//   const FESystem<dim> fe(FE_Q<dim>{fe_degree_fine}, n_components);
+//   const QGauss<dim>   quad(fe_degree_fine + 1);
+
+//   monitor("run::4");
+
+//   dof_handler.distribute_dofs(fe);
+
+//   monitor("run::5-" + std::to_string(dof_handler.n_dofs()));
+
+//   monitor("run::6");
+
+//   std::shared_ptr<Function<dim, Number>> dbc_func;
+//   std::shared_ptr<Function<dim, Number>> rhs_func;
+
+//   if (simulation_type == "Constant")
+//     {
+//       rhs_func = std::make_shared<Functions::ConstantFunction<dim, Number>>(
+//         1.0, n_components);
+//       dbc_func = std::make_shared<Functions::ZeroFunction<dim, Number>>(1.0);
+//     }
+//   else if (simulation_type == "Gaussian")
+//     {
+//       const std::vector<Point<dim>> points = {Point<dim>(-0.5, -0.5, -0.5)};
+//       const double                  width  = 0.1;
+
+//       rhs_func = std::make_shared<GaussianRightHandSide<dim>>(points, width);
+//       dbc_func = std::make_shared<GaussianSolution<dim>>(points, width);
+//     }
+//   else
+//     {
+//       AssertThrow(false, ExcNotImplemented());
+//     }
+
+//   IndexSet locally_relevant_dofs;
+//   DoFTools::extract_locally_relevant_dofs(dof_handler,
+//   locally_relevant_dofs);
+
+//   constraint.reinit(locally_relevant_dofs);
+//   VectorTools::interpolate_boundary_values(
+//     mapping, dof_handler, 0, *dbc_func, constraint);
+//   DoFTools::make_hanging_node_constraints(dof_handler, constraint);
+//   constraint.close();
+
+//   monitor("run::7");
+
+//   op.reinit(mapping, dof_handler, quad, constraint);
+
+//   const MultigridParameters &mg_data = params.mg_data; // TODO
+
+//   VectorType solution, rhs;
+//   op.initialize_dof_vector(solution);
+//   op.initialize_dof_vector(rhs);
+
+//   op.rhs(rhs, rhs_func, mapping, dof_handler, quad);
+
+//   monitor("run::8");
+
+//   table.add_value("dim", dim);
+//   table.add_value("n_cells", triangulations.back()->n_global_active_cells());
+//   table.add_value("n_cells_hn", n_cells_w_hn);
+//   table.add_value("n_cells_n", n_cells_wo_hn);
+//   table.add_value("degree", fe_degree_fine);
+//   table.add_value("n_ref_global", n_ref_global);
+//   table.add_value("n_ref_local", n_ref_local);
+//   table.add_value("n_dofs", dof_handler.n_dofs());
+
+//   if (type == "AMG" || type == "AMGPETSc")
+//     solve_with_amg(type, mg_data, op, solution, rhs, table);
+//   else if (type == "HMG-non-nested")
+//     {
+//       solve_with_global_coarsening_non_nested<LEVEL_NUMBER_TYPE>(type,
+//                                                                  triangulations,
+//                                                                  dof_handler,
+//                                                                  mg_data,
+//                                                                  op,
+//                                                                  solution,
+//                                                                  rhs,
+//                                                                  verbose,
+//                                                                  table);
+//     }
+//   else
+//     AssertThrow(false, ExcNotImplemented());
+
+//   monitor("run::9");
+
+//   monitor("break");
+
+//   if (paraview == false)
+//     return;
+
+//   DataOutBase::VtkFlags flags;
+//   flags.write_higher_order_cells = true;
+
+//   DataOut<dim> data_out;
+//   data_out.set_flags(flags);
+
+//   data_out.attach_dof_handler(dof_handler);
+
+//   solution.update_ghost_values();
+//   constraint.distribute(solution);
+//   data_out.add_data_vector(solution, "solution");
+
+
+//   data_out.build_patches(mapping, 3);
+
+//   data_out.write_vtu_in_parallel("multigrid.vtu", MPI_COMM_WORLD);
+// }
+
+
 
 int
 main(int argc, char **argv)

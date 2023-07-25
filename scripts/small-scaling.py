@@ -38,7 +38,7 @@ def main():
         partitioner_type = sys.argv[2];
 
     if partitioner_type == "":
-      solvers = ["HMG-local", "HMG-global"]
+      solvers = ["HMG-local", "HMG-global","HMG-NN"]
     else:
       solvers = ["HMG-global"]
 
