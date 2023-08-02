@@ -135,16 +135,20 @@ namespace dealii::parallel
   class Helper
   {
   public:
-    Helper(Triangulation<dim, spacedim> &triangulation)
+    explicit Helper(Triangulation<dim, spacedim> &triangulation,
+                    const std::string &           type = "")
     {
-      reinit(triangulation);
+      if (type != "HMG-NN")
+        {
+          reinit(triangulation);
 
-      const auto fu = [&]() { this->reinit(triangulation); };
+          const auto fu = [&]() { this->reinit(triangulation); };
 
-      triangulation.signals.post_p4est_refinement.connect(fu);
-      triangulation.signals.post_distributed_refinement.connect(fu);
-      triangulation.signals.pre_distributed_repartition.connect(fu);
-      triangulation.signals.post_distributed_repartition.connect(fu);
+          triangulation.signals.post_p4est_refinement.connect(fu);
+          triangulation.signals.post_distributed_refinement.connect(fu);
+          triangulation.signals.pre_distributed_repartition.connect(fu);
+          triangulation.signals.post_distributed_repartition.connect(fu);
+        }
     }
 
     void
@@ -2215,7 +2219,8 @@ struct RunParameters
     prm.add_parameter("Partitioner", p);
     prm.add_parameter("PartitionerName", policy_name);
     prm.add_parameter("MinLevel", min_level);
-    prm.add_parameter("MinNCells", min_n_cells);
+    if (type != "HMG-NN")
+      prm.add_parameter("MinNCells", min_n_cells);
     prm.add_parameter("CoarseGridSolverType", mg_data.coarse_solver.type);
     prm.add_parameter("SmootherDegree", mg_data.smoother.degree);
     prm.add_parameter("CoarseSolverNCycles", mg_data.coarse_solver.n_cycles);
@@ -2285,9 +2290,8 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy;
 
-  bool repartition_fine_triangulation = true;
-
-  dealii::parallel::Helper<dim> helper(tria);
+  bool                          repartition_fine_triangulation = true;
+  dealii::parallel::Helper<dim> helper(tria, type);
 
   if (type != "AMG" && type != "AMGPETSc")
     {
@@ -2444,16 +2448,18 @@ run(const RunParameters &params, ConvergenceTable &table)
       // with Global Coarsening
       if (geometry_type == "fichera" || geometry_type == "l_shape")
         {
-          const unsigned int n_levels = (geometry_type == "l_shape") ? 5 : 4;
+          const unsigned int max_n_levels =
+            (geometry_type == "l_shape") ? 5 : 4;
 
           // non-nested hierarchy
-          auto non_nested_triangulations =
+          const auto &non_nested_triangulations =
             MGTools::create_non_nested_sequence<dim>(geometry_type,
-                                                     n_levels,
+                                                     n_ref_global, /*n_levels*/
+                                                     max_n_levels,
                                                      tria.get_communicator());
 
-          for (unsigned int l = 0; l <= n_levels; ++l)
-            triangulations.push_back(non_nested_triangulations[l]);
+          for (const auto &tria : non_nested_triangulations)
+            triangulations.push_back(tria);
         }
       else
         {

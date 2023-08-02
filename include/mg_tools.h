@@ -517,10 +517,13 @@ namespace dealii::MGTools
   std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
   create_non_nested_sequence(const std::string &geometry_type,
                              const unsigned int n_levels,
+                             const unsigned int max_n_levels,
                              const MPI_Comm &   mpi_comm)
   {
-    Assert(n_levels > 0,
-           ExcMessage("A number of levels greater than 0 must be given."));
+    Assert(n_levels <= max_n_levels,
+           ExcMessage("Number of given levels " + std::to_string(n_levels) +
+                      " exceeds the number of possible ones, which is " +
+                      std::to_string(max_n_levels)));
     // Number of levels is hardcoded here, as hierarchy of grids is given a
     // priori.
     std::string suffix = ".msh"; // gmsh
