@@ -30,6 +30,12 @@ def main():
         min_ref = 3;
     elif geometry_type == "annulus":
         min_ref = 5;
+    elif geometry_type == "l_shape":
+      min_ref = 0
+      max_levels = 5  #hard coded 
+    elif geometry_type == "fichera":
+      max_levels = 4;  #hard coded 
+      min_ref = 0; 
     else:
         print('Geometry type not known!')
 
@@ -44,11 +50,17 @@ def main():
 
     counter = 0
 
-    for n_refinements in range(min_ref,20): # number of refinements
-        for k in [1, 4]:                    # degree
-            for solver in solvers:          # h-multigrid types
-                run_instance(counter, geometry_type, n_refinements, k, solver, partitioner_type)
-                counter = counter + 1;
+    if geometry_type == "fichera" or geometry_type == "l_shape":
+        for n_refinements in range(1,max_levels): # number of refinements
+            for k in [1, 4]:                    # degree
+                    run_instance(counter, geometry_type, n_refinements, k, "HMG-NN", "DefaultPolicy")
+                    counter = counter + 1;
+    else:
+        for n_refinements in range(min_ref,20): # number of refinements
+            for k in [1, 4]:                    # degree
+                for solver in solvers:          # h-multigrid types
+                    run_instance(counter, geometry_type, n_refinements, k, solver, partitioner_type)
+                    counter = counter + 1;
 
 
 if __name__== "__main__":

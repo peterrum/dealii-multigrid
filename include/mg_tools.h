@@ -539,7 +539,7 @@ namespace dealii::MGTools
         std::ifstream input_file("../meshes/" + geometry_type + "/" +
                                  geometry_type + "_" + std::to_string(l) +
                                  suffix);
-        if (geometry_type == "l_shape")
+        if constexpr (dim == 2)
           grid_in.read_msh(input_file);
         else
           grid_in.read_abaqus(input_file);
