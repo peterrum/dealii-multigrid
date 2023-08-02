@@ -516,14 +516,15 @@ namespace dealii::MGTools
   template <int dim>
   std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
   create_non_nested_sequence(const std::string &geometry_type,
-                             const unsigned int n_levels)
+                             const unsigned int n_levels,
+                             const MPI_Comm &   mpi_comm)
   {
     Assert(n_levels > 0,
            ExcMessage("A number of levels greater than 0 must be given."));
     // Number of levels is hardcoded here, as hierarchy of grids is given a
     // priori.
     std::string suffix = ".msh"; // gmsh
-    if constexpr (dim == 4)
+    if constexpr (dim == 3)
       suffix = ".inp";
 
     GridIn<dim> grid_in;
@@ -531,9 +532,13 @@ namespace dealii::MGTools
       trias(n_levels + 1);
     for (unsigned int l = 0; l < trias.size(); ++l)
       {
-        trias[l] = std::make_shared<parallel::distributed::Triangulation<dim>>(
-          MPI_COMM_WORLD);
+        trias[l] =
+          std::make_shared<parallel::distributed::Triangulation<dim>>(mpi_comm);
         grid_in.attach_triangulation(*trias[l]);
+
+        std::cout << "../meshes/" + geometry_type + "/" + geometry_type + "_" +
+                       std::to_string(l) + suffix
+                  << std::endl;
 
         std::ifstream input_file("../meshes/" + geometry_type + "/" +
                                  geometry_type + "_" + std::to_string(l) +

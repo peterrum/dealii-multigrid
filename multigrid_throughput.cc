@@ -2193,7 +2193,7 @@ struct RunParameters
   bool         verbose         = true;
   unsigned int p               = 0;
   std::string  policy_name     = "";
-  std::string  mg_number_tyep  = "float";
+  std::string  mg_number_type  = "float";
   std::string  simulation_type = "Constant";
 
   int min_level   = -1;
@@ -2220,7 +2220,7 @@ struct RunParameters
     prm.add_parameter("SmootherDegree", mg_data.smoother.degree);
     prm.add_parameter("CoarseSolverNCycles", mg_data.coarse_solver.n_cycles);
     prm.add_parameter("RelativeTolerance", mg_data.cg_normal.reltol);
-    prm.add_parameter("MGNumberType", mg_number_tyep);
+    prm.add_parameter("MGNumberType", mg_number_type);
     prm.add_parameter("SimulationType", simulation_type);
 
     std::ifstream file;
@@ -2273,6 +2273,11 @@ run(const RunParameters &params, ConvergenceTable &table)
       GridGenerator::hyper_cube(tria, -1.0, +1.0);
       tria.refine_global(n_ref_global);
     }
+  else if ((geometry_type == "l_shape" || geometry_type == "fichera") &&
+           type == "HMG-NN")
+    {
+      // do nothing for non_nested test cases, fill the triangulations later
+    }
   else
     AssertThrow(false, ExcNotImplemented());
 
@@ -2317,6 +2322,8 @@ run(const RunParameters &params, ConvergenceTable &table)
               default:
                 AssertThrow(false, ExcNotImplemented());
             }
+          if (type == "HMG-NN")
+            policy_name = "DefaultPolicy";
         }
 
       const auto is_prefix = [](const std::string &label,
@@ -2391,18 +2398,20 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   types::global_cell_index n_cells_w_hn  = 0;
   types::global_cell_index n_cells_wo_hn = 0;
+  if (type != "HMG-NN")
+    {
+      for (const auto &cell : tria.active_cell_iterators())
+        if (cell->is_locally_owned())
+          {
+            if (helper.is_constrained(cell))
+              n_cells_w_hn++;
+            else
+              n_cells_wo_hn++;
+          }
 
-  for (const auto &cell : tria.active_cell_iterators())
-    if (cell->is_locally_owned())
-      {
-        if (helper.is_constrained(cell))
-          n_cells_w_hn++;
-        else
-          n_cells_wo_hn++;
-      }
-
-  n_cells_w_hn  = Utilities::MPI::sum(n_cells_w_hn, MPI_COMM_WORLD);
-  n_cells_wo_hn = Utilities::MPI::sum(n_cells_wo_hn, MPI_COMM_WORLD);
+      n_cells_w_hn  = Utilities::MPI::sum(n_cells_w_hn, MPI_COMM_WORLD);
+      n_cells_wo_hn = Utilities::MPI::sum(n_cells_wo_hn, MPI_COMM_WORLD);
+    }
 
   monitor("run::3");
 
@@ -2431,12 +2440,31 @@ run(const RunParameters &params, ConvergenceTable &table)
     }
   else
     {
-      triangulations =
-        MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
-          tria,
-          *policy,
-          false /*=preserve_fine_triangulation*/,
-          repartition_fine_triangulation);
+      // Two cases here: non-nested hierarchy, or nested ones used to compare
+      // with Global Coarsening
+      if (geometry_type == "fichera" || geometry_type == "l_shape")
+        {
+          const unsigned int n_levels = (geometry_type == "l_shape") ? 5 : 4;
+
+          // non-nested hierarchy
+          auto non_nested_triangulations =
+            MGTools::create_non_nested_sequence<dim>(geometry_type,
+                                                     n_levels,
+                                                     tria.get_communicator());
+
+          for (unsigned int l = 0; l <= n_levels; ++l)
+            triangulations.push_back(non_nested_triangulations[l]);
+        }
+      else
+        {
+          // This are needed only for comparison with Global Coarsening
+          triangulations = MGTransferGlobalCoarseningTools::
+            create_geometric_coarsening_sequence(
+              tria,
+              *policy,
+              false /*=preserve_fine_triangulation*/,
+              repartition_fine_triangulation);
+        }
     }
 
   if (triangulations.size() > 1)
@@ -2631,6 +2659,7 @@ main(int argc, char **argv)
 {
   try
     {
+      static constexpr unsigned int            dim = 2;
       dealii::Utilities::MPI::MPI_InitFinalize mpi(argc, argv, 1);
 
       const MPI_Comm comm = MPI_COMM_WORLD;
@@ -2658,10 +2687,10 @@ main(int argc, char **argv)
           RunParameters params;
           params.parse(std::string(argv[i]));
 
-          if (params.mg_number_tyep == "double")
-            run<3, 1, double, double>(params, table);
-          else if (params.mg_number_tyep == "float")
-            run<3, 1, double, float>(params, table);
+          if (params.mg_number_type == "double")
+            run<dim, 1, double, double>(params, table);
+          else if (params.mg_number_type == "float")
+            run<dim, 1, double, float>(params, table);
           else
             AssertThrow(false, ExcNotImplemented());
 
