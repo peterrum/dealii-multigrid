@@ -519,7 +519,7 @@ namespace dealii
       template <class VectorType,
                 class PreconditionerType,
                 typename std::enable_if<
-                  std::is_same<typename VectorType::value_type, double>::value,
+                  std::is_same_v<typename VectorType::value_type, double>,
                   VectorType>::type * = nullptr>
       void
       solve(const PreconditionerType preconditioner,
@@ -535,7 +535,7 @@ namespace dealii
       template <class VectorType,
                 class PreconditionerType,
                 typename std::enable_if<
-                  !std::is_same<typename VectorType::value_type, double>::value,
+                  !std::is_same_v<typename VectorType::value_type, double>,
                   VectorType>::type * = nullptr>
       void
       solve(const PreconditionerType preconditioner,
@@ -1105,9 +1105,8 @@ mg_solve(SolverControl &                              solver_control,
                                         min_level,
                                         min_level + offset - 1);
 
-  if constexpr (!std::is_same<
-                  MGTransferTypeCoarse,
-                  MGTransferGlobalCoarsening<dim, VectorType>>::value)
+  if constexpr (!std::is_same_v<MGTransferTypeCoarse,
+                                MGTransferGlobalCoarsening<dim, VectorType>>)
     if (dof_fine.get_triangulation().has_hanging_nodes())
       mg_intermediate.set_edge_in_matrix(mg_interface);
 
@@ -1130,9 +1129,8 @@ mg_solve(SolverControl &                              solver_control,
                                 min_level + offset,
                                 max_level);
 
-  if constexpr (!std::is_same<
-                  MGTransferTypeFine,
-                  MGTransferGlobalCoarsening<dim, VectorType>>::value)
+  if constexpr (!std::is_same_v<MGTransferTypeFine,
+                                MGTransferGlobalCoarsening<dim, VectorType>>)
     if (dof_fine.get_triangulation().has_hanging_nodes())
       mg_fine.set_edge_in_matrix(mg_interface);
 
@@ -1450,18 +1448,19 @@ mg_solve(SolverControl &                              solver_control,
 template <typename LEVEL_NUMBER_TYPE,
           int dim,
           int n_components,
-          typename Number>
+          typename Number,
+          typename OperatorType = Operator<dim, n_components, Number>>
 void
 solve_with_global_coarsening(
   const std::string &                                           type,
   const std::vector<std::shared_ptr<const Triangulation<dim>>> &triangulations,
   const DoFHandler<dim> &                                       dof_handler_in,
   const MultigridParameters &                                   mg_data,
-  const ElasticityOperator<dim, n_components, Number> &         op,
-  typename ElasticityOperator<dim, n_components, Number>::VectorType &      dst,
-  const typename ElasticityOperator<dim, n_components, Number>::VectorType &src,
-  const bool        verbose,
-  ConvergenceTable &table)
+  const OperatorType &                                          op,
+  typename OperatorType::VectorType &                           dst,
+  const typename OperatorType::VectorType &                     src,
+  const bool                                                    verbose,
+  ConvergenceTable &                                            table)
 {
   const auto comm     = dof_handler_in.get_communicator();
   auto       sub_comm = comm;
@@ -1677,18 +1676,19 @@ solve_with_global_coarsening(
 template <typename LEVEL_NUMBER_TYPE,
           int dim,
           int n_components,
-          typename Number>
+          typename Number,
+          typename OperatorType = Operator<dim, n_components, Number>>
 void
 solve_with_global_coarsening_non_nested(
   const std::string &                                           type,
   const std::vector<std::shared_ptr<const Triangulation<dim>>> &triangulations,
   const DoFHandler<dim> &                                       dof_handler_in,
   const MultigridParameters &                                   mg_data,
-  const ElasticityOperator<dim, n_components, Number> &         op,
-  typename ElasticityOperator<dim, n_components, Number>::VectorType &      dst,
-  const typename ElasticityOperator<dim, n_components, Number>::VectorType &src,
-  const bool        verbose,
-  ConvergenceTable &table)
+  const OperatorType &                                          op,
+  typename OperatorType::VectorType &                           dst,
+  const typename OperatorType::VectorType &                     src,
+  const bool                                                    verbose,
+  ConvergenceTable &                                            table)
 {
   const auto comm     = dof_handler_in.get_communicator();
   auto       sub_comm = comm;
@@ -1891,17 +1891,17 @@ solve_with_global_coarsening_non_nested(
 template <typename LEVEL_NUMBER_TYPE,
           int dim,
           int n_components,
-          typename Number>
+          typename Number,
+          typename OperatorType = Operator<dim, n_components, Number>>
 void
-solve_with_local_smoothing(
-  const std::string &                                  type,
-  const DoFHandler<dim> &                              dof_handler_in,
-  const MultigridParameters &                          mg_data,
-  const ElasticityOperator<dim, n_components, Number> &op,
-  typename ElasticityOperator<dim, n_components, Number>::VectorType &      dst,
-  const typename ElasticityOperator<dim, n_components, Number>::VectorType &src,
-  const bool        verbose,
-  ConvergenceTable &table)
+solve_with_local_smoothing(const std::string &                type,
+                           const DoFHandler<dim> &            dof_handler_in,
+                           const MultigridParameters &        mg_data,
+                           const OperatorType &               op,
+                           typename OperatorType::VectorType &dst,
+                           const typename OperatorType::VectorType &src,
+                           const bool                               verbose,
+                           ConvergenceTable &                       table)
 {
   using LevelOperatorType =
     ElasticityOperator<dim, n_components, LEVEL_NUMBER_TYPE>;
@@ -2605,33 +2605,39 @@ run(const RunParameters &params, ConvergenceTable &table)
       solve_with_global_coarsening<LEVEL_NUMBER_TYPE,
                                    dim,
                                    n_components,
-                                   Number>(type,
-                                           triangulations,
-                                           dof_handler,
-                                           mg_data,
-                                           op,
-                                           solution,
-                                           rhs,
-                                           verbose,
-                                           table);
+                                   Number,
+                                   decltype(op)>(type,
+                                                 triangulations,
+                                                 dof_handler,
+                                                 mg_data,
+                                                 op,
+                                                 solution,
+                                                 rhs,
+                                                 verbose,
+                                                 table);
     }
   else if (type == "HMG-local" || type == "HPMG-local")
-    solve_with_local_smoothing<LEVEL_NUMBER_TYPE, dim, n_components, Number>(
+    solve_with_local_smoothing<LEVEL_NUMBER_TYPE,
+                               dim,
+                               n_components,
+                               Number,
+                               decltype(op)>(
       type, dof_handler, mg_data, op, solution, rhs, verbose, table);
   else if (type == "HMG-NN")
     {
       solve_with_global_coarsening_non_nested<LEVEL_NUMBER_TYPE,
                                               dim,
                                               n_components,
-                                              Number>(type,
-                                                      triangulations,
-                                                      dof_handler,
-                                                      mg_data,
-                                                      op,
-                                                      solution,
-                                                      rhs,
-                                                      verbose,
-                                                      table);
+                                              Number,
+                                              decltype(op)>(type,
+                                                            triangulations,
+                                                            dof_handler,
+                                                            mg_data,
+                                                            op,
+                                                            solution,
+                                                            rhs,
+                                                            verbose,
+                                                            table);
     }
   else
     AssertThrow(false, ExcNotImplemented());
