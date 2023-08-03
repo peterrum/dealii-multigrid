@@ -2574,7 +2574,7 @@ run(const RunParameters &params, ConvergenceTable &table)
               quad,
               constraint,
               1.,
-              1.); // TODO: change values for Lame moduli
+              1.); // TODO: allow changing values for Lame moduli
   else
     op.reinit(mapping, dof_handler, quad, constraint);
 
@@ -2649,30 +2649,53 @@ run(const RunParameters &params, ConvergenceTable &table)
   DataOut<dim> data_out;
   data_out.set_flags(flags);
 
-  data_out.attach_dof_handler(dof_handler);
+  if constexpr (n_components == 1)
+    {
+      data_out.attach_dof_handler(dof_handler);
 
-  solution.update_ghost_values();
-  constraint.distribute(solution);
-  data_out.add_data_vector(solution, "solution");
+      solution.update_ghost_values();
+      constraint.distribute(solution);
+      data_out.add_data_vector(solution, "solution");
 
-  if (false)
-    data_out.set_cell_selection(
-      [](const typename Triangulation<dim>::cell_iterator &cell) {
-        if (cell->is_active() && cell->is_locally_owned())
-          {
-            const auto center = cell->center();
+      if (false)
+        data_out.set_cell_selection(
+          [](const typename Triangulation<dim>::cell_iterator &cell) {
+            if (cell->is_active() && cell->is_locally_owned())
+              {
+                const auto center = cell->center();
 
-            bool flag = center[0] <= -0.5;
+                bool flag = center[0] <= -0.5;
 
-            for (unsigned int d = 1; d < dim; ++d)
-              flag |= (center[d] <= -0.5);
+                for (unsigned int d = 1; d < dim; ++d)
+                  flag |= (center[d] <= -0.5);
 
-            return flag;
-          }
+                return flag;
+              }
 
-        return false;
-      });
+            return false;
+          });
+    }
+  else if constexpr (n_components == dim)
+    {
+      std::vector<std::string> field_names(dim, "displacement");
+      std::vector<DataComponentInterpretation::DataComponentInterpretation>
+        field_component_interpretation(
+          dim, DataComponentInterpretation::component_is_part_of_vector);
+      for (unsigned int i = 0; i < dim; ++i)
+        field_component_interpretation[i] =
+          DataComponentInterpretation::component_is_part_of_vector;
 
+      solution.update_ghost_values();
+      constraint.distribute(solution);
+      data_out.add_data_vector(dof_handler,
+                               solution,
+                               field_names,
+                               field_component_interpretation);
+    }
+  else
+    {
+      Assert(false, ExcNotImplemented());
+    }
 
   data_out.build_patches(mapping, 3);
 

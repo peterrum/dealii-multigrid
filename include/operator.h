@@ -571,7 +571,7 @@ public:
 
   using FECellIntegrator = FEEvaluation<dim, -1, 0, n_components, number>;
 
-  // Introduce Lame moduli in constructor
+  // Set Lame moduli here
   void
   reinit(const Mapping<dim> &             mapping,
          const DoFHandler<dim> &          dof_handler,
@@ -955,10 +955,14 @@ public:
                 }
               else
                 {
-                  Tensor<1, n_components> temp;
-
-                  for (int i = 0; i < n_components; ++i)
-                    temp[i] = 1.0;
+                  Tensor<1, n_components, VectorizedArray<number>>
+                    temp; // n_components == dim
+                  for (unsigned int v = 0; v < VectorizedArray<number>::size();
+                       ++v)
+                    {
+                      for (int i = 0; i < n_components; ++i)
+                        temp[i][v] = 1.0;
+                    }
 
                   phi.submit_value(temp, q);
                 }
@@ -1013,8 +1017,9 @@ private:
 
     for (unsigned int q = 0; q < integrator.n_q_points; ++q)
       {
-        integrator.submit_symmetric_gradient(
-          2. * mu * integrator.get_symmetric_gradient(q), q);
+        SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
+          2. * mu * integrator.get_symmetric_gradient(q);
+        integrator.submit_symmetric_gradient(sym_grad_u, q);
         integrator.submit_divergence(lambda * integrator.get_divergence(q), q);
       }
 
@@ -1023,20 +1028,23 @@ private:
 
   void
   do_cell_integral_global(FECellIntegrator &integrator,
+                          FECellIntegrator &integrator2,
                           VectorType &      dst,
                           const VectorType &src) const
   {
     integrator.gather_evaluate(src, EvaluationFlags::gradients);
+    integrator2.gather_evaluate(src, EvaluationFlags::gradients);
 
     for (unsigned int q = 0; q < integrator.n_q_points; ++q)
       {
-        // SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
-        //   2. * mu * integrator.get_symmetric_gradient(q);
-        integrator.submit_symmetric_gradient(
-          2. * mu * integrator.get_symmetric_gradient(q), q);
-        integrator.submit_divergence(lambda * integrator.get_divergence(q), q);
+        SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
+          2. * mu * integrator.get_symmetric_gradient(q);
+        integrator.submit_symmetric_gradient(sym_grad_u, q);
+        integrator2.submit_divergence(lambda * integrator2.get_divergence(q),
+                                      q);
       }
     integrator.integrate_scatter(EvaluationFlags::gradients, dst);
+    integrator2.integrate_scatter(EvaluationFlags::gradients, dst);
   }
 
   template <bool apply_edge_optimization = false>
@@ -1048,6 +1056,7 @@ private:
     const std::pair<unsigned int, unsigned int> &range) const
   {
     FECellIntegrator integrator(matrix_free, range);
+    FECellIntegrator integrator2(matrix_free, range);
 
     for (unsigned cell = range.first; cell < range.second; ++cell)
       {
@@ -1055,8 +1064,9 @@ private:
           continue;
 
         integrator.reinit(cell);
+        integrator2.reinit(cell);
 
-        do_cell_integral_global(integrator, dst, src);
+        do_cell_integral_global(integrator, integrator2, dst, src);
       }
   }
 
