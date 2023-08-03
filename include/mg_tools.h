@@ -526,9 +526,15 @@ namespace dealii::MGTools
                       std::to_string(max_n_levels)));
     // Number of levels is hardcoded here, as hierarchy of grids is given a
     // priori.
-    std::string suffix = ".msh"; // gmsh
-    if constexpr (dim == 3)
-      suffix = ".inp";
+    (void)max_n_levels; // just to suppress warning
+
+    std::string suffix;
+    if constexpr (dim == 2)
+      suffix = ".msh"; // gmsh
+    else if constexpr (dim == 3)
+      suffix = ".inp"; // abaqus
+    else
+      Assert(false, ExcImpossibleInDim());
 
     GridIn<dim> grid_in;
     std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
