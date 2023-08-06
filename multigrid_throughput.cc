@@ -1778,10 +1778,10 @@ solve_with_global_coarsening_non_nested(
           return 0;
         }();
 
-        FE_Q<dim> fe{degree};
-        // const FESystem<dim> fe(FE_Q<dim>{degree},
-        //                        dof_handler_in.get_fe().n_components());
-        const QGauss<dim> quad(fe.degree + 1);
+        // FE_Q<dim> fe{degree};
+        const FESystem<dim> fe(FE_Q<dim>{degree},
+                               dof_handler_in.get_fe().n_components());
+        const QGauss<dim>   quad(fe.degree + 1);
 
         const auto &tria = [&]() -> const Triangulation<dim> & {
           if (type == "HMG-NN")
@@ -2281,7 +2281,8 @@ run(const RunParameters &params, ConvergenceTable &table)
       GridGenerator::hyper_cube(tria, -1.0, +1.0);
       tria.refine_global(n_ref_global);
     }
-  else if ((geometry_type == "l_shape" || geometry_type == "fichera") &&
+  else if ((geometry_type == "l_shape" || geometry_type == "fichera" ||
+            geometry_type == "knuckle") &&
            type == "HMG-NN")
     {
       // do nothing for non_nested test cases, fill the triangulations later
@@ -2449,10 +2450,16 @@ run(const RunParameters &params, ConvergenceTable &table)
     {
       // Two cases here: non-nested hierarchy, or nested ones used to compare
       // with Global Coarsening
-      if (geometry_type == "fichera" || geometry_type == "l_shape")
+      if (geometry_type == "fichera" || geometry_type == "l_shape" ||
+          geometry_type == "knuckle")
         {
-          const unsigned int max_n_levels =
-            (geometry_type == "l_shape") ? 5 : 4;
+          unsigned int max_n_levels = numbers::invalid_unsigned_int;
+          if constexpr (dim == 2)
+            max_n_levels = 5;
+          else if constexpr (dim == 3)
+            max_n_levels = (geometry_type == "fichera") ? 4 : 3;
+          else
+            Assert(false, ExcInternalError());
 
           // non-nested hierarchy
           const auto &non_nested_triangulations =
@@ -2715,8 +2722,8 @@ main(int argc, char **argv)
 {
   try
     {
-      static constexpr unsigned int            dim          = 2;
-      static constexpr unsigned                n_components = 2; // 1 or dim
+      static constexpr unsigned int            dim          = 3;
+      static constexpr unsigned                n_components = dim; // 1 or dim
       dealii::Utilities::MPI::MPI_InitFinalize mpi(argc, argv, 1);
 
       const MPI_Comm comm = MPI_COMM_WORLD;
