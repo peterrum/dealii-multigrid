@@ -1019,8 +1019,12 @@ private:
       {
         SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
           2. * mu * integrator.get_symmetric_gradient(q);
+        const auto lambda_div_u = lambda * integrator.get_divergence(q);
+        // Add lambda div(u)I
+        for (unsigned int i = 0; i < dim; ++i)
+          sym_grad_u[i][i] += lambda_div_u;
+
         integrator.submit_symmetric_gradient(sym_grad_u, q);
-        integrator.submit_divergence(lambda * integrator.get_divergence(q), q);
       }
 
     integrator.integrate(EvaluationFlags::gradients);
@@ -1028,23 +1032,23 @@ private:
 
   void
   do_cell_integral_global(FECellIntegrator &integrator,
-                          FECellIntegrator &integrator2,
                           VectorType &      dst,
                           const VectorType &src) const
   {
     integrator.gather_evaluate(src, EvaluationFlags::gradients);
-    integrator2.gather_evaluate(src, EvaluationFlags::gradients);
 
     for (unsigned int q = 0; q < integrator.n_q_points; ++q)
       {
         SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
           2. * mu * integrator.get_symmetric_gradient(q);
+        const auto lambda_div_u = lambda * integrator.get_divergence(q);
+        // Add lambda div(u)I
+        for (unsigned int i = 0; i < dim; ++i)
+          sym_grad_u[i][i] += lambda_div_u;
+
         integrator.submit_symmetric_gradient(sym_grad_u, q);
-        integrator2.submit_divergence(lambda * integrator2.get_divergence(q),
-                                      q);
       }
     integrator.integrate_scatter(EvaluationFlags::gradients, dst);
-    integrator2.integrate_scatter(EvaluationFlags::gradients, dst);
   }
 
   template <bool apply_edge_optimization = false>
@@ -1056,7 +1060,6 @@ private:
     const std::pair<unsigned int, unsigned int> &range) const
   {
     FECellIntegrator integrator(matrix_free, range);
-    FECellIntegrator integrator2(matrix_free, range);
 
     for (unsigned cell = range.first; cell < range.second; ++cell)
       {
@@ -1064,9 +1067,8 @@ private:
           continue;
 
         integrator.reinit(cell);
-        integrator2.reinit(cell);
 
-        do_cell_integral_global(integrator, integrator2, dst, src);
+        do_cell_integral_global(integrator, dst, src);
       }
   }
 
