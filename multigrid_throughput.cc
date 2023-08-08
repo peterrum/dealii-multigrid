@@ -1449,7 +1449,7 @@ template <typename LEVEL_NUMBER_TYPE,
           int dim,
           int n_components,
           typename Number,
-          typename OperatorType = Operator<dim, n_components, Number>>
+          typename OperatorType = LaplaceOperator<dim, n_components, Number>>
 void
 solve_with_global_coarsening(
   const std::string &                                           type,
@@ -1529,16 +1529,12 @@ solve_with_global_coarsening(
       return 0;
     }();
 
-    using LevelOperatorType =
-      ElasticityOperator<dim, n_components, LEVEL_NUMBER_TYPE>;
-
     MGLevelObject<DoFHandler<dim>> dof_handlers(min_level, max_level);
-    MGLevelObject<AffineConstraints<typename LevelOperatorType::value_type>>
+    MGLevelObject<AffineConstraints<typename OperatorType::value_type>>
       constraints(min_level, max_level);
-    MGLevelObject<
-      MGTwoLevelTransfer<dim, typename LevelOperatorType::VectorType>>
-                                     transfers(min_level, max_level);
-    MGLevelObject<LevelOperatorType> operators(min_level, max_level);
+    MGLevelObject<MGTwoLevelTransfer<dim, typename OperatorType::VectorType>>
+                                transfers(min_level, max_level);
+    MGLevelObject<OperatorType> operators(min_level, max_level);
 
     MappingQ1<dim> mapping;
 
@@ -1593,7 +1589,7 @@ solve_with_global_coarsening(
           mapping,
           dof_handler,
           0,
-          Functions::ZeroFunction<dim, typename LevelOperatorType::value_type>(
+          Functions::ZeroFunction<dim, typename OperatorType::value_type>(
             dof_handler_in.get_fe().n_components()),
           constraint);
         DoFTools::make_hanging_node_constraints(dof_handler, constraint);
@@ -1622,8 +1618,8 @@ solve_with_global_coarsening(
                      dof_handler_in.get_communicator()) == 0)
       table_.write_text(std::cout);
 
-    MGTransferGlobalCoarsening<dim, typename LevelOperatorType::VectorType>
-      transfer(transfers, [&](const auto l, auto &vec) {
+    MGTransferGlobalCoarsening<dim, typename OperatorType::VectorType> transfer(
+      transfers, [&](const auto l, auto &vec) {
         operators[l].initialize_dof_vector(vec);
       });
 
@@ -1677,7 +1673,7 @@ template <typename LEVEL_NUMBER_TYPE,
           int dim,
           int n_components,
           typename Number,
-          typename OperatorType = Operator<dim, n_components, Number>>
+          typename OperatorType = LaplaceOperator<dim, n_components, Number>>
 void
 solve_with_global_coarsening_non_nested(
   const std::string &                                           type,
@@ -1747,17 +1743,15 @@ solve_with_global_coarsening_non_nested(
       return 0;
     }();
 
-    using LevelOperatorType =
-      ElasticityOperator<dim, n_components, LEVEL_NUMBER_TYPE>;
 
     MGLevelObject<DoFHandler<dim>> dof_handlers(min_level, max_level);
-    MGLevelObject<AffineConstraints<typename LevelOperatorType::value_type>>
+    MGLevelObject<AffineConstraints<typename OperatorType::value_type>>
                                   constraints(min_level, max_level);
     MGLevelObject<MappingQ1<dim>> mappings(min_level, max_level);
     MGLevelObject<
-      MGTwoLevelTransferNonNested<dim, typename LevelOperatorType::VectorType>>
-                                     transfers(min_level, max_level);
-    MGLevelObject<LevelOperatorType> operators(min_level, max_level);
+      MGTwoLevelTransferNonNested<dim, typename OperatorType::VectorType>>
+                                transfers(min_level, max_level);
+    MGLevelObject<OperatorType> operators(min_level, max_level);
 
     MappingQ1<dim> mapping;
 
@@ -1778,7 +1772,6 @@ solve_with_global_coarsening_non_nested(
           return 0;
         }();
 
-        // FE_Q<dim> fe{degree};
         const FESystem<dim> fe(FE_Q<dim>{degree},
                                dof_handler_in.get_fe().n_components());
         const QGauss<dim>   quad(fe.degree + 1);
@@ -1803,7 +1796,7 @@ solve_with_global_coarsening_non_nested(
           mapping,
           dof_handler,
           0,
-          Functions::ZeroFunction<dim, typename LevelOperatorType::value_type>(
+          Functions::ZeroFunction<dim, typename OperatorType::value_type>(
             dof_handler_in.get_fe().n_components()),
           constraint);
         DoFTools::make_hanging_node_constraints(dof_handler, constraint);
@@ -1836,8 +1829,8 @@ solve_with_global_coarsening_non_nested(
                      dof_handler_in.get_communicator()) == 0)
       table_.write_text(std::cout);
 
-    MGTransferGlobalCoarsening<dim, typename LevelOperatorType::VectorType>
-      transfer(transfers, [&](const auto l, auto &vec) {
+    MGTransferGlobalCoarsening<dim, typename OperatorType::VectorType> transfer(
+      transfers, [&](const auto l, auto &vec) {
         operators[l].initialize_dof_vector(vec);
       });
 
@@ -1892,7 +1885,7 @@ template <typename LEVEL_NUMBER_TYPE,
           int dim,
           int n_components,
           typename Number,
-          typename OperatorType = Operator<dim, n_components, Number>>
+          typename OperatorType = LaplaceOperator<dim, n_components, Number>>
 void
 solve_with_local_smoothing(const std::string &                type,
                            const DoFHandler<dim> &            dof_handler_in,
@@ -1903,9 +1896,6 @@ solve_with_local_smoothing(const std::string &                type,
                            const bool                               verbose,
                            ConvergenceTable &                       table)
 {
-  using LevelOperatorType =
-    ElasticityOperator<dim, n_components, LEVEL_NUMBER_TYPE>;
-
   const bool do_pmg = type == "HPMG-local";
 
   const auto level_degrees =
@@ -1941,11 +1931,11 @@ solve_with_local_smoothing(const std::string &                type,
     (dof_handler_in.get_triangulation().n_global_levels() - 1) +
     (do_pmg ? level_degrees.size() : 0);
 
-  MGLevelObject<AffineConstraints<typename LevelOperatorType::value_type>>
-                                   constraints(min_level, max_level);
-  MGLevelObject<LevelOperatorType> operators(min_level, max_level);
+  MGLevelObject<AffineConstraints<typename OperatorType::value_type>>
+                              constraints(min_level, max_level);
+  MGLevelObject<OperatorType> operators(min_level, max_level);
 
-  MGLevelObject<MGTwoLevelTransfer<dim, typename LevelOperatorType::VectorType>>
+  MGLevelObject<MGTwoLevelTransfer<dim, typename OperatorType::VectorType>>
     transfers(std::min(max_level,
                        dof_handler_in.get_triangulation().n_global_levels()),
               max_level);
@@ -2008,7 +1998,7 @@ solve_with_local_smoothing(const std::string &                type,
           mapping,
           dof_handler,
           0,
-          Functions::ZeroFunction<dim, typename LevelOperatorType::value_type>(
+          Functions::ZeroFunction<dim, typename OperatorType::value_type>(
             dof_handler_in.get_fe().n_components()),
           constraint);
         DoFTools::make_hanging_node_constraints(dof_handler, constraint);
@@ -2019,7 +2009,7 @@ solve_with_local_smoothing(const std::string &                type,
 
   monitor("solve_with_local_smoothing::1");
 
-  MGTransferMatrixFree<dim, typename LevelOperatorType::value_type> transfer_ls(
+  MGTransferMatrixFree<dim, typename OperatorType::value_type> transfer_ls(
     mg_constrained_dofs);
   transfer_ls.build(dof_handlers.front(), partitioners);
 
@@ -2033,7 +2023,7 @@ solve_with_local_smoothing(const std::string &                type,
                               constraints[l + 1],
                               constraints[l]);
 
-  MGTransferGlobalCoarsening<dim, typename LevelOperatorType::VectorType>
+  MGTransferGlobalCoarsening<dim, typename OperatorType::VectorType>
     transfer_gc(transfers, [&](const auto l, auto &vec) {
       operators[l].initialize_dof_vector(vec);
     });
@@ -2242,9 +2232,10 @@ struct RunParameters
 template <int dim,
           int n_components,
           typename Number = double,
-          typename LEVEL_NUMBER_TYPE>
+          typename LEVEL_NUMBER_TYPE,
+          typename OperatorType = LaplaceOperator<dim, n_components, Number>>
 void
-run(const RunParameters &params, ConvergenceTable &table)
+run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
 {
   const std::string  type            = params.type;
   const std::string  geometry_type   = params.geometry_type;
@@ -2330,9 +2321,12 @@ run(const RunParameters &params, ConvergenceTable &table)
               default:
                 AssertThrow(false, ExcNotImplemented());
             }
-          if (type == "HMG-NN")
-            policy_name = "DefaultPolicy";
         }
+
+      // If we have HMG-NN, no tria has been attached, so force DefaultPolicy to
+      // avoid operations on empty trias.
+      if (type == "HMG-NN")
+        policy_name = "DefaultPolicy";
 
       const auto is_prefix = [](const std::string &label,
                                 const std::string &prefix) -> bool {
@@ -2521,8 +2515,6 @@ run(const RunParameters &params, ConvergenceTable &table)
   DoFHandler<dim> dof_handler(*triangulations.back());
 
   AffineConstraints<Number> constraint;
-  // Operator<dim, n_components, Number> op;
-  ElasticityOperator<dim, n_components, Number> op; // linear elasticity
 
   MappingQ1<dim> mapping;
 
@@ -2574,14 +2566,9 @@ run(const RunParameters &params, ConvergenceTable &table)
 
   monitor("run::7");
 
-  if (std::is_same_v<decltype(op),
-                     ElasticityOperator<dim, n_components, Number>>)
-    op.reinit(mapping,
-              dof_handler,
-              quad,
-              constraint,
-              1.,
-              1.); // TODO: allow changing values for Lame moduli
+  if constexpr (std::is_same_v<OperatorType,
+                               ElasticityOperator<dim, n_components, Number>>)
+    op.reinit(mapping, dof_handler, quad, constraint);
   else
     op.reinit(mapping, dof_handler, quad, constraint);
 
@@ -2613,7 +2600,7 @@ run(const RunParameters &params, ConvergenceTable &table)
                                    dim,
                                    n_components,
                                    Number,
-                                   decltype(op)>(type,
+                                   OperatorType>(type,
                                                  triangulations,
                                                  dof_handler,
                                                  mg_data,
@@ -2628,7 +2615,7 @@ run(const RunParameters &params, ConvergenceTable &table)
                                dim,
                                n_components,
                                Number,
-                               decltype(op)>(
+                               OperatorType>(
       type, dof_handler, mg_data, op, solution, rhs, verbose, table);
   else if (type == "HMG-NN")
     {
@@ -2636,7 +2623,7 @@ run(const RunParameters &params, ConvergenceTable &table)
                                               dim,
                                               n_components,
                                               Number,
-                                              decltype(op)>(type,
+                                              OperatorType>(type,
                                                             triangulations,
                                                             dof_handler,
                                                             mg_data,
@@ -2720,14 +2707,19 @@ run(const RunParameters &params, ConvergenceTable &table)
 int
 main(int argc, char **argv)
 {
+#ifndef OPERATOR
+  static_assert(false, "No differential operator has been given. ");
+#endif
+
+  static constexpr unsigned int dim                     = 3;
+  static constexpr unsigned int n_components_elasticity = dim;
+  static constexpr unsigned int n_components_laplace    = 1;
+
   try
     {
-      static constexpr unsigned int            dim          = 3;
-      static constexpr unsigned                n_components = dim; // 1 or dim
       dealii::Utilities::MPI::MPI_InitFinalize mpi(argc, argv, 1);
 
-      const MPI_Comm comm = MPI_COMM_WORLD;
-
+      const MPI_Comm             comm = MPI_COMM_WORLD;
       dealii::ConditionalOStream pcout(
         std::cout, dealii::Utilities::MPI::this_mpi_process(comm) == 0);
 
@@ -2751,19 +2743,61 @@ main(int argc, char **argv)
           RunParameters params;
           params.parse(std::string(argv[i]));
 
-          if (params.mg_number_type == "double")
-            run<dim, n_components, double, double>(params, table);
-          else if (params.mg_number_type == "float")
-            run<dim, n_components, double, float>(params, table);
-          else
-            AssertThrow(false, ExcNotImplemented());
+          // Scalar LaplaceOperator or ElasticityOperator (n_components==dim).
+          if constexpr (OPERATOR == 0)
+            {
+              LaplaceOperator<dim, n_components_laplace, double>
+                laplace_operator;
+              if (params.mg_number_type == "double")
+                run<dim,
+                    n_components_laplace,
+                    double,
+                    double,
+                    decltype(laplace_operator)>(laplace_operator,
+                                                params,
+                                                table);
+              else if (params.mg_number_type == "float")
+                run<dim,
+                    n_components_laplace,
+                    double,
+                    float,
+                    decltype(laplace_operator)>(laplace_operator,
+                                                params,
+                                                table);
+              else
+                AssertThrow(false, ExcNotImplemented());
 
-          if (pcout.is_active())
-            table.write_text(pcout.get_stream());
+              if (pcout.is_active())
+                table.write_text(pcout.get_stream());
+            }
+          else if constexpr (OPERATOR == 1)
+            {
+              ElasticityOperator<dim, n_components_elasticity, double>
+                elasticity_operator(1., 1.); // Lame coefficents set here. TODO:
+                                             // maybe from .json?
+              if (params.mg_number_type == "double")
+                run<dim,
+                    n_components_elasticity,
+                    double,
+                    double,
+                    decltype(elasticity_operator)>(elasticity_operator,
+                                                   params,
+                                                   table);
+              else if (params.mg_number_type == "float")
+                run<dim,
+                    n_components_elasticity,
+                    double,
+                    float,
+                    decltype(elasticity_operator)>(elasticity_operator,
+                                                   params,
+                                                   table);
+              else
+                AssertThrow(false, ExcNotImplemented());
+
+              if (pcout.is_active())
+                table.write_text(pcout.get_stream());
+            }
         }
-
-      if (pcout.is_active())
-        table.write_text(pcout.get_stream());
     }
   catch (std::exception &exc)
     {

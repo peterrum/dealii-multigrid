@@ -9,7 +9,7 @@ using namespace dealii;
 
 
 template <int dim_, int n_components, typename Number>
-class Operator : public Subscriptor
+class LaplaceOperator : public Subscriptor
 {
 public:
   using value_type = Number;
@@ -164,7 +164,7 @@ public:
       }
 
     this->matrix_free.cell_loop(
-      &Operator::do_cell_integral_range, this, dst, src, true);
+      &LaplaceOperator::do_cell_integral_range, this, dst, src, true);
 
     // set constrained dofs as the sum of current dst value and src value
     for (unsigned int i = 0; i < constrained_indices.size(); ++i)
@@ -192,7 +192,7 @@ public:
   vmult_interface_down(VectorType &dst, VectorType const &src) const
   {
     this->matrix_free.cell_loop(
-      &Operator::do_cell_integral_range, this, dst, src, true);
+      &LaplaceOperator::do_cell_integral_range, this, dst, src, true);
 
     // set constrained dofs as the sum of current dst value and src value
     for (unsigned int i = 0; i < constrained_indices.size(); ++i)
@@ -221,8 +221,11 @@ public:
         src.local_element(edge_constrained_indices[i]);
 
     // do loop with copy of src
-    this->matrix_free.cell_loop(
-      &Operator::do_cell_integral_range<true>, this, dst, src_cpy, false);
+    this->matrix_free.cell_loop(&LaplaceOperator::do_cell_integral_range<true>,
+                                this,
+                                dst,
+                                src_cpy,
+                                false);
   }
 
   void
@@ -231,7 +234,7 @@ public:
     matrix_free.initialize_dof_vector(diagonal);
     MatrixFreeTools::compute_diagonal(matrix_free,
                                       diagonal,
-                                      &Operator::do_cell_integral_local,
+                                      &LaplaceOperator::do_cell_integral_local,
                                       this);
 
     for (unsigned int i = 0; i < edge_constrained_indices.size(); ++i)
@@ -275,11 +278,12 @@ public:
         dsp.compress();
         trilinos_system_matrix.reinit(dsp);
 
-        MatrixFreeTools::compute_matrix(matrix_free,
-                                        constraints,
-                                        trilinos_system_matrix,
-                                        &Operator::do_cell_integral_local,
-                                        this);
+        MatrixFreeTools::compute_matrix(
+          matrix_free,
+          constraints,
+          trilinos_system_matrix,
+          &LaplaceOperator::do_cell_integral_local,
+          this);
       }
 
     return this->trilinos_system_matrix;
@@ -346,11 +350,12 @@ public:
                                    mpi_communicator);
 
         // Assemble system matrix.
-        MatrixFreeTools::compute_matrix(matrix_free,
-                                        constraints,
-                                        petsc_system_matrix,
-                                        &Operator::do_cell_integral_local,
-                                        this);
+        MatrixFreeTools::compute_matrix(
+          matrix_free,
+          constraints,
+          petsc_system_matrix,
+          &LaplaceOperator::do_cell_integral_local,
+          this);
       }
 
     return this->petsc_system_matrix;
@@ -437,7 +442,8 @@ public:
 
     // perform matrix-vector multiplication (with unconstrained system and
     // constrained set in vector)
-    matrix_free.cell_loop(&Operator::do_cell_integral_range, this, b, x, true);
+    matrix_free.cell_loop(
+      &LaplaceOperator::do_cell_integral_range, this, b, x, true);
 
     // clear constrained values
     constraints.set_zero(b);
@@ -572,18 +578,20 @@ public:
   using FECellIntegrator = FEEvaluation<dim, -1, 0, n_components, number>;
 
   // Set Lame moduli here
+  ElasticityOperator(const double lambda_ = 1., const double mu_ = 1.)
+  {
+    Assert(mu > 0., ExcMessage("Shear modulus must be positive."));
+    lambda = lambda_;
+    mu     = mu_;
+  }
+
   void
   reinit(const Mapping<dim> &             mapping,
          const DoFHandler<dim> &          dof_handler,
          const Quadrature<dim> &          quad,
          const AffineConstraints<number> &constraints,
-         const double                     lambda_ = 1.,
-         const double                     mu_     = 1.,
          const unsigned int mg_level = numbers::invalid_unsigned_int)
   {
-    Assert(mu > 0., ExcMessage("Shear modulus must be positive."));
-    lambda = lambda_;
-    mu     = mu_;
 #ifdef DEAL_II_WITH_TRILINOS
     this->trilinos_system_matrix.clear();
 #endif
@@ -1017,14 +1025,15 @@ private:
 
     for (unsigned int q = 0; q < integrator.n_q_points; ++q)
       {
-        SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
-          2. * mu * integrator.get_symmetric_gradient(q);
-        const auto lambda_div_u = lambda * integrator.get_divergence(q);
+        const SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
+          integrator.get_symmetric_gradient(q);
+        const auto lambda_div_u = lambda * trace(sym_grad_u);
+        auto       stress       = 2. * mu * sym_grad_u;
         // Add lambda div(u)I
         for (unsigned int i = 0; i < dim; ++i)
-          sym_grad_u[i][i] += lambda_div_u;
+          stress[i][i] += lambda_div_u;
 
-        integrator.submit_symmetric_gradient(sym_grad_u, q);
+        integrator.submit_symmetric_gradient(stress, q);
       }
 
     integrator.integrate(EvaluationFlags::gradients);
@@ -1039,14 +1048,15 @@ private:
 
     for (unsigned int q = 0; q < integrator.n_q_points; ++q)
       {
-        SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
-          2. * mu * integrator.get_symmetric_gradient(q);
-        const auto lambda_div_u = lambda * integrator.get_divergence(q);
+        const SymmetricTensor<2, dim, VectorizedArray<number>> sym_grad_u =
+          integrator.get_symmetric_gradient(q);
+        const auto lambda_div_u = lambda * trace(sym_grad_u);
+        auto       stress       = 2. * mu * sym_grad_u;
         // Add lambda div(u)I
         for (unsigned int i = 0; i < dim; ++i)
-          sym_grad_u[i][i] += lambda_div_u;
+          stress[i][i] += lambda_div_u;
 
-        integrator.submit_symmetric_gradient(sym_grad_u, q);
+        integrator.submit_symmetric_gradient(stress, q);
       }
     integrator.integrate_scatter(EvaluationFlags::gradients, dst);
   }
