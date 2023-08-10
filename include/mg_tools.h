@@ -512,7 +512,8 @@ namespace dealii::MGTools
     return result;
   }
 
-
+  // Number of levels is hardcoded here, as hierarchy of grids is given a
+  // priori.
   template <int dim>
   std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
   create_non_nested_sequence(const std::string &geometry_type,
@@ -524,17 +525,31 @@ namespace dealii::MGTools
            ExcMessage("Number of given levels " + std::to_string(n_levels) +
                       " exceeds the number of possible ones, which is " +
                       std::to_string(max_n_levels)));
-    // Number of levels is hardcoded here, as hierarchy of grids is given a
-    // priori.
     (void)max_n_levels; // just to suppress warning
 
     std::string suffix;
     if constexpr (dim == 2)
-      suffix = ".msh"; // gmsh
+      {
+        Assert(geometry_type == "l_shape",
+               ExcMessage(
+                 "The given geometry, " + geometry_type +
+                 ", is not available for dim = " + std::to_string(dim)));
+        suffix = ".msh"; // gmsh
+      }
     else if constexpr (dim == 3)
-      suffix = ".inp"; // abaqus
+      {
+        Assert(geometry_type == "fichera" || geometry_type == "knuckle",
+               ExcMessage(
+                 "The given geometry, " + geometry_type +
+                 ", is not available for dim = " + std::to_string(dim)));
+        suffix = ".inp"; // abaqus
+      }
     else
-      Assert(false, ExcImpossibleInDim());
+      {
+        Assert(false, ExcImpossibleInDim());
+      }
+
+
 
     GridIn<dim> grid_in;
     std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
