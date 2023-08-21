@@ -35,8 +35,8 @@ public:
     this->constraints.copy_from(constraints);
 
     typename MatrixFree<dim, number>::AdditionalData data;
-    data.mapping_update_flags =
-      update_quadrature_points | update_gradients | update_values;
+    data.mapping_update_flags = update_quadrature_points | update_gradients |
+                                update_values | update_normal_vectors;
     data.mg_level = mg_level;
 
     matrix_free.reinit(mapping, dof_handler, constraints, quad, data);
@@ -563,7 +563,14 @@ private:
 };
 
 
-
+/**
+ * The following operator implements the action of a classic linear elasticity
+ * operator with:
+ * - Homogeneous boundary conditions on boundary_id == 0
+ * - Dirichlet boundary conditions on boundary_id == 1
+ * - Inhomogeneous Neumann boundary conditions on boundary_id == 2
+ *
+ */
 template <int dim_, int n_components, typename Number>
 class ElasticityOperator : public Subscriptor
 {
@@ -576,10 +583,11 @@ public:
   static const int dim = dim_;
 
   using FECellIntegrator = FEEvaluation<dim, -1, 0, n_components, number>;
-
+  using FEFaceIntegrator = FEFaceEvaluation<dim, -1, 0, n_components, number>;
   // Set Lame moduli here
   ElasticityOperator(const double lambda_ = 1., const double mu_ = 1.)
   {
+    Assert(dim == 3, ExcMessage("The elasticity example is 3D only."));
     Assert(mu > 0., ExcMessage("Shear modulus must be positive."));
     lambda = lambda_;
     mu     = mu_;
@@ -592,6 +600,10 @@ public:
          const AffineConstraints<number> &constraints,
          const unsigned int mg_level = numbers::invalid_unsigned_int)
   {
+    Assert(
+      dof_handler.get_triangulation().get_boundary_ids().size() == 3,
+      ExcMessage(
+        "The following example is configured with mixed boundary conditions. Check the original triangulation."));
 #ifdef DEAL_II_WITH_TRILINOS
     this->trilinos_system_matrix.clear();
 #endif
@@ -601,6 +613,10 @@ public:
     typename MatrixFree<dim, number>::AdditionalData data;
     data.mapping_update_flags =
       update_quadrature_points | update_gradients | update_values;
+    data.mapping_update_flags_boundary_faces =
+      (update_JxW_values | update_quadrature_points | update_normal_vectors |
+       update_values);
+
     data.mg_level = mg_level;
 
     matrix_free.reinit(mapping, dof_handler, constraints, quad, data);
@@ -934,48 +950,40 @@ public:
       const DoFHandler<dim> &               dof_handler,
       const Quadrature<dim> &               quad) const
   {
-    const int dummy = 0;
+    const int    dummy    = 0;
+    const double pressure = +1e6;
 
-    matrix_free.template cell_loop<VectorType, int>(
+    matrix_free.template loop<VectorType, int>(
       [&rhs_func](
         const auto &matrix_free, auto &dst, const auto &, const auto cells) {
-        FECellIntegrator phi(matrix_free, cells);
-        for (unsigned int cell = cells.first; cell < cells.second; ++cell)
+        (void)matrix_free;
+        (void)dst;
+        (void)cells;
+      },
+      [](const auto &matrix_free, auto &dst, const auto &, const auto cells) {
+        (void)matrix_free;
+        (void)dst;
+        (void)cells;
+      },
+      [&pressure](const auto &matrix_free,
+                  auto &      dst,
+                  const auto &,
+                  const auto face_range) {
+        FEFaceIntegrator phi(matrix_free, true);
+        for (unsigned int face = face_range.first; face < face_range.second;
+             ++face)
           {
-            phi.reinit(cell);
-            for (unsigned int q = 0; q < phi.n_q_points; ++q)
-              if constexpr (n_components == 1)
-                {
-                  VectorizedArray<number> coeff = 0;
-
-                  const auto point_batch = phi.quadrature_point(q);
-
-                  for (unsigned int v = 0; v < VectorizedArray<number>::size();
-                       ++v)
-                    {
-                      Point<dim> single_point;
-                      for (unsigned int d = 0; d < dim; d++)
-                        single_point[d] = point_batch[d][v];
-                      coeff[v] = rhs_func->value(single_point);
-                    }
-
-                  phi.submit_value(coeff, q);
-                }
-              else
-                {
-                  Tensor<1, n_components, VectorizedArray<number>>
-                    temp; // n_components == dim
-                  for (unsigned int v = 0; v < VectorizedArray<number>::size();
-                       ++v)
-                    {
-                      for (int i = 0; i < n_components; ++i)
-                        temp[i][v] = 1.0;
-                    }
-
-                  phi.submit_value(temp, q);
-                }
-
-            phi.integrate_scatter(EvaluationFlags::values, dst);
+            // if (matrix_free.get_boundary_id(face) == 1) //beam example
+            if (matrix_free.get_boundary_id(face) == 2)
+              {
+                // pressure is applied on boundary id number 2
+                phi.reinit(face);
+                for (unsigned int q = 0; q < phi.n_q_points; ++q)
+                  {
+                    phi.submit_value((pressure)*phi.normal_vector(q), q);
+                  }
+                phi.integrate_scatter(EvaluationFlags::values, dst);
+              }
           }
       },
       system_rhs,

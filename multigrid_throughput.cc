@@ -1748,13 +1748,19 @@ solve_with_global_coarsening_non_nested(
     MGLevelObject<AffineConstraints<typename OperatorType::value_type>>
                                   constraints(min_level, max_level);
     MGLevelObject<MappingQ1<dim>> mappings(min_level, max_level);
-    MGLevelObject<
-      MGTwoLevelTransferNonNested<dim, typename OperatorType::VectorType>>
+    MGLevelObject<std::shared_ptr<
+      MGTwoLevelTransferNonNested<dim, typename OperatorType::VectorType>>>
                                 transfers(min_level, max_level);
     MGLevelObject<OperatorType> operators(min_level, max_level);
 
     MappingQ1<dim> mapping;
 
+    typename MGTwoLevelTransferNonNested<
+      dim,
+      typename OperatorType::VectorType>::AdditionalData data{};
+    data.tolerance                = 1e-2;
+    data.rtree_level              = 1;
+    data.enforce_all_points_found = true;
     monitor("solve_with_global_coarsening_non_nested::2");
 
     for (auto l = min_level; l <= max_level; ++l)
@@ -1792,13 +1798,30 @@ solve_with_global_coarsening_non_nested(
         DoFTools::extract_locally_relevant_dofs(dof_handler,
                                                 locally_relevant_dofs);
         constraint.reinit(locally_relevant_dofs);
-        VectorTools::interpolate_boundary_values(
-          mapping,
-          dof_handler,
-          0,
-          Functions::ZeroFunction<dim, typename OperatorType::value_type>(
-            dof_handler_in.get_fe().n_components()),
-          constraint);
+        if constexpr (std::is_same_v<
+                        OperatorType,
+                        ElasticityOperator<dim, n_components, Number>>)
+          {
+            // boundary id = 1 -> clamped bdary, no displacement.
+            VectorTools::interpolate_boundary_values(
+              mapping,
+              dof_handler,
+              1,
+              Functions::ZeroFunction<dim, typename OperatorType::value_type>(
+                dof_handler_in.get_fe().n_components()),
+              constraint);
+          }
+        else
+          {
+            // classical homogeneous Dirichlet for other operators.
+            VectorTools::interpolate_boundary_values(
+              mapping,
+              dof_handler,
+              0,
+              Functions::ZeroFunction<dim, typename OperatorType::value_type>(
+                dof_handler_in.get_fe().n_components()),
+              constraint);
+          }
         DoFTools::make_hanging_node_constraints(dof_handler, constraint);
         constraint.close();
 
@@ -1809,12 +1832,15 @@ solve_with_global_coarsening_non_nested(
 
     for (unsigned int l = min_level; l < max_level; ++l)
       {
-        transfers[l + 1].reinit(dof_handlers[l + 1],
-                                dof_handlers[l],
-                                mappings[l + 1],
-                                mappings[l],
-                                constraints[l + 1],
-                                constraints[l]);
+        transfers[l + 1] = std::make_shared<
+          MGTwoLevelTransferNonNested<dim, typename OperatorType::VectorType>>(
+          data);
+        transfers[l + 1]->reinit(dof_handlers[l + 1],
+                                 dof_handlers[l],
+                                 mappings[l + 1],
+                                 mappings[l],
+                                 constraints[l + 1],
+                                 constraints[l]);
       }
 
     ConvergenceTable table_;
@@ -2559,8 +2585,18 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
 
   constraint.reinit(locally_relevant_dofs);
-  VectorTools::interpolate_boundary_values(
-    mapping, dof_handler, 0, *dbc_func, constraint);
+  if constexpr (std::is_same_v<OperatorType,
+                               ElasticityOperator<dim, n_components, Number>>)
+    {
+      // boundary id 1 for elasticity examples: no displacement
+      VectorTools::interpolate_boundary_values(
+        mapping, dof_handler, 1, *dbc_func, constraint);
+    }
+  else
+    {
+      VectorTools::interpolate_boundary_values(
+        mapping, dof_handler, 0, *dbc_func, constraint);
+    }
   DoFTools::make_hanging_node_constraints(dof_handler, constraint);
   constraint.close();
 
@@ -2772,9 +2808,15 @@ main(int argc, char **argv)
             }
           else if constexpr (OPERATOR == 1)
             {
+              // physical parameters steel
+              const double E      = 193e9; // 193 GPa
+              const double nu     = .3;
+              const double lambda = (E * nu) / ((1. + nu) * (1 - 2. * nu));
+              const double mu     = (E) / (2. * (1 + nu));
+
               ElasticityOperator<dim, n_components_elasticity, double>
-                elasticity_operator(1., 1.); // Lame coefficents set here. TODO:
-                                             // maybe from .json?
+                elasticity_operator(lambda, mu); // Lame coefficents set here.
+                                                 // TODO: maybe from .json?
               if (params.mg_number_type == "double")
                 run<dim,
                     n_components_elasticity,
