@@ -538,7 +538,8 @@ namespace dealii::MGTools
       }
     else if constexpr (dim == 3)
       {
-        Assert(geometry_type == "fichera" || geometry_type == "knuckle",
+        Assert(geometry_type == "fichera" || geometry_type == "knuckle" ||
+                 geometry_type == "wrench",
                ExcMessage(
                  "The given geometry, " + geometry_type +
                  ", is not available for dim = " + std::to_string(dim)));
