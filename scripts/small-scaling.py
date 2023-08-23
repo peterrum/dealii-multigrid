@@ -36,7 +36,7 @@ def main():
     elif geometry_type == "fichera":
         max_levels = 4;  #hard coded 
         min_ref = 0; 
-    elif geometry_type == "knuckle":
+    elif geometry_type == "piston":
         max_levels = 3;  #hard coded 
         min_ref = 0; 
     elif geometry_type == "wrench":
@@ -56,7 +56,7 @@ def main():
 
     counter = 0
 
-    if geometry_type == "fichera" or geometry_type == "l_shape" or geometry_type == "knuckle" or geometry_type == "wrench":
+    if geometry_type == "fichera" or geometry_type == "l_shape" or geometry_type == "piston" or geometry_type == "wrench":
         for n_refinements in range(1,max_levels): # number of refinements
             for k in [1, 4]:                    # degree
                     run_instance(counter, geometry_type, n_refinements, k, "HMG-NN", "DefaultPolicy")

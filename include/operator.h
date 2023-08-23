@@ -951,11 +951,11 @@ public:
       const Quadrature<dim> &               quad) const
   {
     const int    dummy    = 0;
-    const double pressure = +1e6;
+    const double pressure = -1e5;
+    (void)rhs_func;
 
     matrix_free.template loop<VectorType, int>(
-      [&rhs_func](
-        const auto &matrix_free, auto &dst, const auto &, const auto cells) {
+      [](const auto &matrix_free, auto &dst, const auto &, const auto cells) {
         (void)matrix_free;
         (void)dst;
         (void)cells;
@@ -973,10 +973,9 @@ public:
         for (unsigned int face = face_range.first; face < face_range.second;
              ++face)
           {
-            // if (matrix_free.get_boundary_id(face) == 1) //beam example
+            // pressure is applied on boundary id number 2
             if (matrix_free.get_boundary_id(face) == 2)
               {
-                // pressure is applied on boundary id number 2
                 phi.reinit(face);
                 for (unsigned int q = 0; q < phi.n_q_points; ++q)
                   {

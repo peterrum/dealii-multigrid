@@ -325,8 +325,8 @@ struct MultigridParameters
   struct
   {
     unsigned int maxiter = 10000;
-    double       abstol  = 1e-20;
-    double       reltol  = 1e-4;
+    double       abstol  = 1e-20; // 1e-20;
+    double       reltol  = 1e-4;  // 1e-4;
   } cg_normal;
 
   struct
@@ -337,7 +337,7 @@ struct MultigridParameters
   } cg_parameter_study;
 
   bool         do_parameter_study = false;
-  unsigned int n_repetitions      = 1; // 5
+  unsigned int n_repetitions      = 1; // 1
 };
 
 
@@ -1588,7 +1588,7 @@ solve_with_global_coarsening(
         VectorTools::interpolate_boundary_values(
           mapping,
           dof_handler,
-          0,
+          1,
           Functions::ZeroFunction<dim, typename OperatorType::value_type>(
             dof_handler_in.get_fe().n_components()),
           constraint);
@@ -1754,13 +1754,13 @@ solve_with_global_coarsening_non_nested(
     MGLevelObject<OperatorType> operators(min_level, max_level);
 
     MappingQ1<dim> mapping;
-
     typename MGTwoLevelTransferNonNested<
       dim,
-      typename OperatorType::VectorType>::AdditionalData data{};
+      typename OperatorType::VectorType>::AdditionalData data;
+    data.enforce_all_points_found = false;
     data.tolerance                = 1e-1;
-    data.rtree_level              = 1;
-    data.enforce_all_points_found = true;
+    data.rtree_level              = 2;
+
     monitor("solve_with_global_coarsening_non_nested::2");
 
     for (auto l = min_level; l <= max_level; ++l)
@@ -1802,7 +1802,7 @@ solve_with_global_coarsening_non_nested(
                         OperatorType,
                         ElasticityOperator<dim, n_components, Number>>)
           {
-            // boundary id = 1 -> clamped bdary, no displacement.
+            // boundary id for 0 displacement is id 1.
             VectorTools::interpolate_boundary_values(
               mapping,
               dof_handler,
@@ -1813,7 +1813,6 @@ solve_with_global_coarsening_non_nested(
           }
         else
           {
-            // classical homogeneous Dirichlet for other operators.
             VectorTools::interpolate_boundary_values(
               mapping,
               dof_handler,
@@ -2299,7 +2298,7 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
       tria.refine_global(n_ref_global);
     }
   else if ((geometry_type == "l_shape" || geometry_type == "fichera" ||
-            geometry_type == "knuckle" || geometry_type == "wrench") &&
+            geometry_type == "piston" || geometry_type == "wrench") &&
            type == "HMG-NN")
     {
       // do nothing for non_nested test cases, fill the triangulations later
@@ -2468,10 +2467,10 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
     }
   else
     {
-      // Two cases here: non-nested hierarchy, or nested ones used to compare
+      // Two cases here : non - nested hierarchy, or nested ones used to compare
       // with Global Coarsening
       if (geometry_type == "fichera" || geometry_type == "l_shape" ||
-          geometry_type == "knuckle" || geometry_type == "wrench")
+          geometry_type == "piston" || geometry_type == "wrench")
         {
           unsigned int max_n_levels = numbers::invalid_unsigned_int;
           if constexpr (dim == 2)
@@ -2808,7 +2807,6 @@ main(int argc, char **argv)
             }
           else if constexpr (OPERATOR == 1)
             {
-              // physical parameters steel
               const double E      = 193e9; // 193 GPa
               const double nu     = .3;
               const double lambda = (E * nu) / ((1. + nu) * (1 - 2. * nu));
