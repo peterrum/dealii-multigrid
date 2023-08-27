@@ -1588,7 +1588,7 @@ solve_with_global_coarsening(
         VectorTools::interpolate_boundary_values(
           mapping,
           dof_handler,
-          1,
+          0,
           Functions::ZeroFunction<dim, typename OperatorType::value_type>(
             dof_handler_in.get_fe().n_components()),
           constraint);
@@ -1689,6 +1689,10 @@ solve_with_global_coarsening_non_nested(
   const auto comm     = dof_handler_in.get_communicator();
   auto       sub_comm = comm;
 
+#ifdef SIMPLEX
+  Assert(dof_handler_in.get_fe().degree <= 2, ExcNotImplemented());
+#endif
+
   monitor("solve_with_global_coarsening_non_nested::0");
 
   {
@@ -1744,16 +1748,28 @@ solve_with_global_coarsening_non_nested(
     }();
 
 
+#ifdef SIMPLEX
+    MGLevelObject<std::unique_ptr<MappingFE<dim>>> mappings(min_level,
+                                                            max_level);
+#else
+    MGLevelObject<std::unique_ptr<MappingQ<dim>>> mappings(min_level,
+                                                           max_level);
+#endif
+
     MGLevelObject<DoFHandler<dim>> dof_handlers(min_level, max_level);
     MGLevelObject<AffineConstraints<typename OperatorType::value_type>>
-                                  constraints(min_level, max_level);
-    MGLevelObject<MappingQ1<dim>> mappings(min_level, max_level);
+      constraints(min_level, max_level);
     MGLevelObject<std::shared_ptr<
       MGTwoLevelTransferNonNested<dim, typename OperatorType::VectorType>>>
                                 transfers(min_level, max_level);
     MGLevelObject<OperatorType> operators(min_level, max_level);
 
-    MappingQ1<dim> mapping;
+#ifdef SIMPLEX
+    MappingFE<dim> mapping(FE_SimplexP<dim>(dof_handler_in.get_fe().degree));
+#else
+    MappingQ1<dim>                                mapping;
+#endif
+
     typename MGTwoLevelTransferNonNested<
       dim,
       typename OperatorType::VectorType>::AdditionalData data;
@@ -1777,10 +1793,18 @@ solve_with_global_coarsening_non_nested(
 
           return 0;
         }();
-
+#ifdef SIMPLEX
+        const FESystem<dim>      fe(FE_SimplexP<dim>{degree},
+                               dof_handler_in.get_fe().n_components());
+        const QGaussSimplex<dim> quad(fe.degree + 1);
+        mappings[l] =
+          std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(fe.degree));
+#else
         const FESystem<dim> fe(FE_Q<dim>{degree},
                                dof_handler_in.get_fe().n_components());
         const QGauss<dim>   quad(fe.degree + 1);
+        mappings[l] = std::make_unique<MappingQ<dim>>(1);
+#endif
 
         const auto &tria = [&]() -> const Triangulation<dim> & {
           if (type == "HMG-NN")
@@ -1836,8 +1860,8 @@ solve_with_global_coarsening_non_nested(
           data);
         transfers[l + 1]->reinit(dof_handlers[l + 1],
                                  dof_handlers[l],
-                                 mappings[l + 1],
-                                 mappings[l],
+                                 *mappings[l + 1],
+                                 *mappings[l],
                                  constraints[l + 1],
                                  constraints[l]);
       }
@@ -2298,7 +2322,8 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
       tria.refine_global(n_ref_global);
     }
   else if ((geometry_type == "l_shape" || geometry_type == "fichera" ||
-            geometry_type == "piston" || geometry_type == "wrench") &&
+            geometry_type == "piston" || geometry_type == "wrench" ||
+            geometry_type == "wrench_tetrahedral") &&
            type == "HMG-NN")
     {
       // do nothing for non_nested test cases, fill the triangulations later
@@ -2470,7 +2495,8 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
       // Two cases here : non - nested hierarchy, or nested ones used to compare
       // with Global Coarsening
       if (geometry_type == "fichera" || geometry_type == "l_shape" ||
-          geometry_type == "piston" || geometry_type == "wrench")
+          geometry_type == "piston" || geometry_type == "wrench" ||
+          geometry_type == "wrench_tetrahedral")
         {
           unsigned int max_n_levels = numbers::invalid_unsigned_int;
           if constexpr (dim == 2)
@@ -2541,10 +2567,15 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
 
   AffineConstraints<Number> constraint;
 
-  MappingQ1<dim> mapping;
-
+#ifdef SIMPLEX
+  const FESystem<dim>      fe(FE_SimplexP<dim>{fe_degree_fine}, n_components);
+  const QGaussSimplex<dim> quad(fe_degree_fine + 1);
+  MappingFE<dim>           mapping(FE_SimplexP<dim>{fe_degree_fine});
+#else
   const FESystem<dim> fe(FE_Q<dim>{fe_degree_fine}, n_components);
   const QGauss<dim>   quad(fe_degree_fine + 1);
+  MappingQ1<dim>      mapping;
+#endif
 
   monitor("run::4");
 
@@ -2732,7 +2763,11 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
       Assert(false, ExcNotImplemented());
     }
 
+#ifdef SIMPLEX
+  data_out.build_patches(mapping, 2);
+#else
   data_out.build_patches(mapping, 3);
+#endif
 
   data_out.write_vtu_in_parallel("multigrid.vtu", MPI_COMM_WORLD);
 }

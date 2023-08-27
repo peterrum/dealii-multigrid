@@ -3,6 +3,7 @@
 
 #include <deal.II/grid/cell_id_translator.h>
 #include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_tools.h>
 
 namespace dealii::MGTools
 {
@@ -515,7 +516,7 @@ namespace dealii::MGTools
   // Number of levels is hardcoded here, as hierarchy of grids is given a
   // priori.
   template <int dim>
-  std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
+  std::vector<std::shared_ptr<Triangulation<dim>>>
   create_non_nested_sequence(const std::string &geometry_type,
                              const unsigned int n_levels,
                              const unsigned int max_n_levels,
@@ -527,6 +528,50 @@ namespace dealii::MGTools
                       std::to_string(max_n_levels)));
     (void)max_n_levels; // just to suppress warning
 
+    std::vector<std::shared_ptr<Triangulation<dim>>> trias(n_levels + 1);
+
+#ifdef SIMPLEX
+    Assert(dim == 3, ExcImpossibleInDim(dim));
+    Assert(geometry_type == "wrench_tetrahedral",
+           ExcMessage("The given geometry, " + geometry_type +
+                      ", is not available for dim = " + std::to_string(dim) +
+                      " with simplices."));
+    std::string suffix = ".msh";
+
+    for (unsigned int l = 0; l < trias.size(); ++l)
+      {
+        trias[l] =
+          std::make_shared<parallel::fullydistributed::Triangulation<dim>>(
+            mpi_comm);
+
+        std::ifstream input_file("../meshes/" + geometry_type + "/" +
+                                 geometry_type + "_" + std::to_string(l) +
+                                 suffix);
+
+        // create description
+        const TriangulationDescription::Description<dim, dim> description =
+          TriangulationDescription::Utilities::
+            create_description_from_triangulation_in_groups<dim, dim>(
+              [&](auto &tria_base) {
+                GridIn<dim> grid_in;
+                grid_in.attach_triangulation(tria_base);
+                grid_in.read_msh(input_file);
+              },
+              [&](auto &tria_base,
+                  const MPI_Comm /*mpi_comm*/,
+                  const unsigned int /*group_size*/) {
+                GridTools::partition_triangulation(
+                  Utilities::MPI::n_mpi_processes(mpi_comm), tria_base);
+              },
+              mpi_comm,
+              Utilities::MPI::n_mpi_processes(mpi_comm));
+
+        // create triangulation
+        trias[l]->create_triangulation(description);
+      }
+    return trias;
+#else
+    GridIn<dim> grid_in;
     std::string suffix;
     if constexpr (dim == 2)
       {
@@ -550,11 +595,6 @@ namespace dealii::MGTools
         Assert(false, ExcImpossibleInDim());
       }
 
-
-
-    GridIn<dim> grid_in;
-    std::vector<std::shared_ptr<parallel::distributed::Triangulation<dim>>>
-      trias(n_levels + 1);
     for (unsigned int l = 0; l < trias.size(); ++l)
       {
         trias[l] =
@@ -570,5 +610,6 @@ namespace dealii::MGTools
           grid_in.read_abaqus(input_file);
       }
     return trias;
+#endif
   }
 } // namespace dealii::MGTools

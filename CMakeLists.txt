@@ -33,6 +33,11 @@ set(VARIANTS_OP "LAPLACE;ELASTICITY")
 
 set(OPTION_OP_LAPLACE "OPERATOR=0")
 set(OPTION_OP_ELASTICITY "OPERATOR=1")
+option(SIMPLEX "Set SIMPLEX=ON to run the example with a simplex mesh" OFF)
+
+if(SIMPLEX)
+  ADD_DEFINITIONS(-DSIMPLEX)
+endif(SIMPLEX)
 
 foreach(VAR_OP ${VARIANTS_OP})
   set(executable_name "multigrid_throughput-${VAR_OP}")
