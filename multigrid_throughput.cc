@@ -1773,9 +1773,13 @@ solve_with_global_coarsening_non_nested(
     typename MGTwoLevelTransferNonNested<
       dim,
       typename OperatorType::VectorType>::AdditionalData data;
-    data.enforce_all_points_found = false;
-    data.tolerance                = 1e-1;
-    data.rtree_level              = 2;
+    if constexpr (std::is_same_v<OperatorType,
+                                 ElasticityOperator<dim, n_components, Number>>)
+      {
+        data.enforce_all_points_found = false;
+        data.tolerance                = 1e-1;
+        data.rtree_level              = 2;
+      }
 
     monitor("solve_with_global_coarsening_non_nested::2");
 
@@ -1793,15 +1797,14 @@ solve_with_global_coarsening_non_nested(
 
           return 0;
         }();
+
 #ifdef SIMPLEX
-        const FESystem<dim>      fe(FE_SimplexP<dim>{degree},
-                               dof_handler_in.get_fe().n_components());
+        const FESystem<dim>      fe(FE_SimplexP<dim>{degree}, n_components);
         const QGaussSimplex<dim> quad(fe.degree + 1);
         mappings[l] =
           std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(fe.degree));
 #else
-        const FESystem<dim> fe(FE_Q<dim>{degree},
-                               dof_handler_in.get_fe().n_components());
+        const FESystem<dim> fe(FE_Q<dim>{degree}, n_components);
         const QGauss<dim>   quad(fe.degree + 1);
         mappings[l] = std::make_unique<MappingQ<dim>>(1);
 #endif
