@@ -58,6 +58,12 @@
 
 using namespace dealii;
 
+static std::vector<std::string> geometries = {"l_shape",
+                                              "fichera",
+                                              "piston",
+                                              "wrench",
+                                              "wrench_tetrahedral"};
+
 template <int dim>
 class GaussianSolution : public dealii::Function<dim>
 {
@@ -135,10 +141,9 @@ namespace dealii::parallel
   class Helper
   {
   public:
-    explicit Helper(Triangulation<dim, spacedim> &triangulation,
-                    const std::string &           type = "")
+    explicit Helper(Triangulation<dim, spacedim> &triangulation)
     {
-      if (type != "HMG-NN")
+      if (triangulation.n_active_cells() > 0)
         {
           reinit(triangulation);
 
@@ -825,7 +830,8 @@ template <int dim,
           typename SystemMatrixType,
           typename LevelMatrixType,
           typename MGTransferTypeFine,
-          typename MGTransferTypeCoarse>
+          typename MGTransferTypeCoarse,
+          typename MGTwoLevels = int>
 static void
 mg_solve(SolverControl &                              solver_control,
          typename SystemMatrixType::VectorType &      dst,
@@ -840,7 +846,8 @@ mg_solve(SolverControl &                              solver_control,
          const unsigned int                           offset,
          const bool                                   verbose,
          const MPI_Comm &                             sub_comm,
-         ConvergenceTable &                           table)
+         ConvergenceTable &                           table,
+         const MGTwoLevels &                          two_levels = 0)
 {
   AssertThrow(mg_data.smoother.type == "chebyshev", ExcNotImplemented());
 
@@ -1184,6 +1191,47 @@ mg_solve(SolverControl &                              solver_control,
     };
   };
 
+  std::pair<double, std::chrono::time_point<std::chrono::system_clock>>
+    non_nested_evaluation_pro, non_nested_evaluation_res;
+
+  // Measure evaluations in non-nested case
+  if constexpr (!std::is_same_v<int, MGTwoLevels>)
+    {
+      const auto timer_evaluation_prolongation =
+        [&non_nested_evaluation_pro](const bool flag) {
+          if (flag)
+            non_nested_evaluation_pro.second = std::chrono::system_clock::now();
+          else
+            non_nested_evaluation_pro.first +=
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now() -
+                non_nested_evaluation_pro.second)
+                .count() /
+              1e9;
+        };
+      const auto timer_evaluation_restriction =
+        [&non_nested_evaluation_res](const bool flag) {
+          if (flag)
+            non_nested_evaluation_res.second = std::chrono::system_clock::now();
+          else
+            non_nested_evaluation_res.first +=
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now() -
+                non_nested_evaluation_res.second)
+                .count() /
+              1e9;
+        };
+
+      for (unsigned int l = min_level; l < max_level; ++l)
+        {
+          two_levels[l + 1]->connect_prolongation_cell_loop(
+            timer_evaluation_prolongation);
+          two_levels[l + 1]->connect_restriction_cell_loop(
+            timer_evaluation_restriction);
+        }
+    }
+
+
   {
     mg_fine.connect_pre_smoother_step(
       create_mg_timer_function(0, "pre_smoother_step"));
@@ -1405,6 +1453,18 @@ mg_solve(SolverControl &                              solver_control,
                   mg_precon_timers[1].first / solver_control.last_step());
   table.set_scientific("time_to_global", true);
 
+  if constexpr (!std::is_same_v<int, MGTwoLevels>)
+    {
+      table.add_value("time_res_evaluation",
+                      non_nested_evaluation_res.first /
+                        solver_control.last_step());
+      table.set_scientific("time_res_evaluation", true);
+      table.add_value("time_pro_evaluation",
+                      non_nested_evaluation_pro.first /
+                        solver_control.last_step());
+      table.set_scientific("time_pro_evaluation", true);
+    }
+
   monitor("mg_solve::5");
 }
 
@@ -1413,7 +1473,8 @@ mg_solve(SolverControl &                              solver_control,
 template <int dim,
           typename SystemMatrixType,
           typename LevelMatrixType,
-          typename MGTransferType>
+          typename MGTransferType,
+          typename MGTwoLevels = int>
 static void
 mg_solve(SolverControl &                              solver_control,
          typename SystemMatrixType::VectorType &      dst,
@@ -1425,7 +1486,8 @@ mg_solve(SolverControl &                              solver_control,
          const MGTransferType &                       mg_transfer,
          const bool                                   verbose,
          const MPI_Comm &                             sub_comm,
-         ConvergenceTable &                           table)
+         ConvergenceTable &                           table,
+         const MGTwoLevels &                          two_levels = 0)
 {
   mg_solve<dim, SystemMatrixType, LevelMatrixType, MGTransferType>(
     solver_control,
@@ -1441,7 +1503,8 @@ mg_solve(SolverControl &                              solver_control,
     0,
     verbose,
     sub_comm,
-    table);
+    table,
+    two_levels);
 }
 
 
@@ -1777,8 +1840,18 @@ solve_with_global_coarsening_non_nested(
                                  ElasticityOperator<dim, n_components, Number>>)
       {
         data.enforce_all_points_found = false;
-        data.tolerance                = 1e-1;
-        data.rtree_level              = 2;
+
+        // wrench
+        if (dof_handler_in.get_fe().degree >= 3)
+          {
+            data.tolerance   = .5;
+            data.rtree_level = 3;
+          }
+        else
+          {
+            data.tolerance   = 1e-1; // k=3, tol=.5;
+            data.rtree_level = 3;    // k=3,level=3
+          }
       }
 
     monitor("solve_with_global_coarsening_non_nested::2");
@@ -1912,7 +1985,8 @@ solve_with_global_coarsening_non_nested(
              transfer,
              verbose,
              sub_comm,
-             table);
+             table,
+             transfers);
 
     monitor("solve_with_global_coarsening_non_nested::5");
   }
@@ -2324,22 +2398,23 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
       GridGenerator::hyper_cube(tria, -1.0, +1.0);
       tria.refine_global(n_ref_global);
     }
-  else if ((geometry_type == "l_shape" || geometry_type == "fichera" ||
-            geometry_type == "piston" || geometry_type == "wrench" ||
-            geometry_type == "wrench_tetrahedral") &&
-           type == "HMG-NN")
+  else if ((std::find(geometries.cbegin(), geometries.cend(), geometry_type) !=
+            std::end(geometries)) &&
+           (type == "HMG-NN" || type == "AMG"))
     {
       // do nothing for non_nested test cases, fill the triangulations later
     }
   else
-    AssertThrow(false, ExcNotImplemented());
+    AssertThrow(false,
+                dealii::ExcMessage("Geometry <" + geometry_type +
+                                   "> not known!"));
 
   monitor("run::2-" + std::to_string(tria.n_global_active_cells()));
 
   std::unique_ptr<RepartitioningPolicyTools::Base<dim>> policy;
 
   bool                          repartition_fine_triangulation = true;
-  dealii::parallel::Helper<dim> helper(tria, type);
+  dealii::parallel::Helper<dim> helper(tria);
 
   if (type != "AMG" && type != "AMGPETSc")
     {
@@ -2453,7 +2528,7 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
 
   types::global_cell_index n_cells_w_hn  = 0;
   types::global_cell_index n_cells_wo_hn = 0;
-  if (type != "HMG-NN")
+  if (type != "HMG-NN" && tria.n_active_cells() > 0)
     {
       for (const auto &cell : tria.active_cell_iterators())
         if (cell->is_locally_owned())
@@ -2489,7 +2564,9 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
 
       triangulations.emplace_back(new_triangulation);
     }
-  else if (type == "AMG" || type == "AMGPETSc")
+  else if ((type == "AMG" || type == "AMGPETSc") &&
+           std::find(geometries.cbegin(), geometries.cend(), geometry_type) ==
+             std::end(geometries))
     {
       triangulations.emplace_back(&tria, [](auto *) {});
     }
@@ -2497,9 +2574,8 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
     {
       // Two cases here : non - nested hierarchy, or nested ones used to compare
       // with Global Coarsening
-      if (geometry_type == "fichera" || geometry_type == "l_shape" ||
-          geometry_type == "piston" || geometry_type == "wrench" ||
-          geometry_type == "wrench_tetrahedral")
+      if (std::find(geometries.cbegin(), geometries.cend(), geometry_type) !=
+          std::end(geometries))
         {
           unsigned int max_n_levels = numbers::invalid_unsigned_int;
           if constexpr (dim == 2)
