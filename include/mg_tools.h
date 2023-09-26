@@ -4,6 +4,7 @@
 #include <deal.II/grid/cell_id_translator.h>
 #include <deal.II/grid/grid_in.h>
 #include <deal.II/grid/grid_tools.h>
+#include <deal.II/grid/grid_tools_cache.h>
 
 namespace dealii::MGTools
 {
@@ -84,8 +85,13 @@ namespace dealii::MGTools
   std::tuple<std::vector<types::global_dof_index>,
              std::vector<types::global_dof_index>,
              MPI_Comm>
-  vertical_communication_cost(const Triangulation<dim, spacedim> &tria)
+  vertical_communication_cost(const Triangulation<dim, spacedim> &tria,
+                              const bool                          nested = true)
   {
+    (void)nested;
+    Assert(nested == true,
+           ExcMessage(
+             "This function is meant to be called by nested hierarchies."));
     const unsigned int n_global_levels = tria.n_global_levels();
 
     std::vector<types::global_dof_index> cells_local(n_global_levels);
@@ -120,74 +126,141 @@ namespace dealii::MGTools
              MPI_Comm>
   vertical_communication_cost(
     const std::vector<std::shared_ptr<const Triangulation<dim, spacedim>>>
-      &trias)
+      &        trias,
+    const bool nested = true)
   {
+    const MPI_Comm     communicator    = trias.back()->get_communicator();
     const unsigned int n_global_levels = trias.size();
-
     std::vector<types::global_dof_index> cells_local(n_global_levels);
     std::vector<types::global_dof_index> cells_remote(n_global_levels);
 
-    const MPI_Comm communicator = trias.back()->get_communicator();
-
-    const unsigned int my_rank = Utilities::MPI::this_mpi_process(communicator);
-
-    for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
+    if (nested)
       {
-        const auto &tria_coarse = *trias[lvl];
-        const auto &tria_fine   = *trias[lvl + 1];
+        const unsigned int my_rank =
+          Utilities::MPI::this_mpi_process(communicator);
 
-        const unsigned int n_coarse_cells  = tria_fine.n_global_coarse_cells();
-        const unsigned int n_global_levels = tria_fine.n_global_levels();
+        for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
+          {
+            const auto &tria_coarse = *trias[lvl];
+            const auto &tria_fine   = *trias[lvl + 1];
 
-        const dealii::internal::CellIDTranslator<dim> cell_id_translator(
-          n_coarse_cells, n_global_levels);
+            const unsigned int n_coarse_cells =
+              tria_fine.n_global_coarse_cells();
+            const unsigned int n_global_levels = tria_fine.n_global_levels();
 
-        IndexSet is_fine_owned(cell_id_translator.size());
-        IndexSet is_fine_required(cell_id_translator.size());
+            const dealii::internal::CellIDTranslator<dim> cell_id_translator(
+              n_coarse_cells, n_global_levels);
 
-        for (const auto &cell : tria_fine.active_cell_iterators())
-          if (!cell->is_artificial() && cell->is_locally_owned())
-            is_fine_owned.add_index(cell_id_translator.translate(cell));
+            IndexSet is_fine_owned(cell_id_translator.size());
+            IndexSet is_fine_required(cell_id_translator.size());
 
-        for (const auto &cell : tria_coarse.active_cell_iterators())
-          if (!cell->is_artificial() && cell->is_locally_owned())
-            {
-              if (cell->level() + 1u == tria_fine.n_global_levels())
-                continue;
+            for (const auto &cell : tria_fine.active_cell_iterators())
+              if (!cell->is_artificial() && cell->is_locally_owned())
+                is_fine_owned.add_index(cell_id_translator.translate(cell));
 
-              for (unsigned int i = 0;
-                   i < GeometryInfo<dim>::max_children_per_cell;
-                   ++i)
-                is_fine_required.add_index(
-                  cell_id_translator.translate(cell, i));
-            }
+            for (const auto &cell : tria_coarse.active_cell_iterators())
+              if (!cell->is_artificial() && cell->is_locally_owned())
+                {
+                  if (cell->level() + 1u == tria_fine.n_global_levels())
+                    continue;
+
+                  for (unsigned int i = 0;
+                       i < GeometryInfo<dim>::max_children_per_cell;
+                       ++i)
+                    is_fine_required.add_index(
+                      cell_id_translator.translate(cell, i));
+                }
 
 
-        std::vector<unsigned int> is_fine_required_ranks(
-          is_fine_required.n_elements());
+            std::vector<unsigned int> is_fine_required_ranks(
+              is_fine_required.n_elements());
 
-        Utilities::MPI::internal::ComputeIndexOwner::ConsensusAlgorithmsPayload
-          process(is_fine_owned,
-                  is_fine_required,
-                  communicator,
-                  is_fine_required_ranks,
-                  false);
+            Utilities::MPI::internal::ComputeIndexOwner::
+              ConsensusAlgorithmsPayload process(is_fine_owned,
+                                                 is_fine_required,
+                                                 communicator,
+                                                 is_fine_required_ranks,
+                                                 false);
 
-        Utilities::MPI::ConsensusAlgorithms::Selector<
-          std::vector<
-            std::pair<types::global_cell_index, types::global_cell_index>>,
-          std::vector<unsigned int>>
-          consensus_algorithm;
-        consensus_algorithm.run(process, communicator);
+            Utilities::MPI::ConsensusAlgorithms::Selector<
+              std::vector<
+                std::pair<types::global_cell_index, types::global_cell_index>>,
+              std::vector<unsigned int>>
+              consensus_algorithm;
+            consensus_algorithm.run(process, communicator);
 
-        for (unsigned i = 0; i < is_fine_required.n_elements(); ++i)
-          if (is_fine_required_ranks[i] == my_rank)
-            ++cells_local[lvl + 1];
-          else if (is_fine_required_ranks[i] != numbers::invalid_unsigned_int)
-            ++cells_remote[lvl + 1];
+            for (unsigned i = 0; i < is_fine_required.n_elements(); ++i)
+              if (is_fine_required_ranks[i] == my_rank)
+                ++cells_local[lvl + 1];
+              else if (is_fine_required_ranks[i] !=
+                       numbers::invalid_unsigned_int)
+                ++cells_remote[lvl + 1];
+          }
+
+        return {cells_local, cells_remote, trias.back()->get_communicator()};
       }
+    else
+      {
+        // In this case, instead of cells we are checking for points, so the
+        // names used in the return statement are a bit misleading.
+        static constexpr double tol = 1e-14;
 
-    return {cells_local, cells_remote, trias.back()->get_communicator()};
+        // Use distributed_compute_point_locations() for consecutive levels
+        for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
+          {
+            const auto &tria_coarse = *trias[lvl];
+            const auto &tria_fine   = *trias[lvl + 1];
+
+            GridTools::Cache<dim> cache_fine(tria_fine);
+            const auto &          mapping = cache_fine.get_mapping();
+            IteratorFilters::LocallyOwnedCell locally_owned_cell_predicate;
+            std::vector<BoundingBox<dim>>     local_bbox =
+              GridTools::compute_mesh_predicate_bounding_box(
+                tria_coarse,
+                std::function<bool(
+                  const typename Triangulation<dim>::active_cell_iterator &)>(
+                  locally_owned_cell_predicate),
+                1,
+                false,
+                4);
+            std::vector<std::vector<BoundingBox<dim>>> global_bboxes;
+            global_bboxes =
+              Utilities::MPI::all_gather(communicator, local_bbox);
+
+            // instead of computing the real location of every support point,
+            // just take the vertices of each cell as locally owned points. This
+            // should be enough to have a good indication.
+            std::vector<Point<dim>> locally_owned_points;
+            for (const auto &cell : tria_fine.active_cell_iterators())
+              if (cell->is_locally_owned())
+                {
+                  // Get vertices and push them back
+                  const auto &vertices = mapping.get_vertices(cell);
+                  for (const auto &p : vertices)
+                    locally_owned_points.emplace_back(p);
+                }
+
+            const auto &output_tuple =
+              GridTools::distributed_compute_point_locations(
+                cache_fine, locally_owned_points, global_bboxes, tol);
+
+            const auto &maps   = std::get<2>(output_tuple);
+            const auto &points = std::get<3>(output_tuple);
+            for (unsigned int i = 0; i < points.size(); ++i)
+              {
+                for (unsigned int j = 0; j < maps[i].size(); ++j)
+                  {
+                    if ((locally_owned_points[maps[i][j]] - points[i][j])
+                          .norm() < tol)
+                      ++cells_local[lvl + 1];
+                    else
+                      ++cells_remote[lvl + 1];
+                  }
+              }
+          }
+
+        return {cells_local, cells_remote, trias.back()->get_communicator()};
+      }
   }
 
   template <int dim, int spacedim>
@@ -268,7 +341,7 @@ namespace dealii::MGTools
 
   template <typename T>
   std::vector<std::pair<std::string, double>>
-  print_multigrid_statistics(const T &trias)
+  print_multigrid_statistics(const T &trias, const bool nested = true)
   {
     std::vector<std::pair<std::string, double>> result;
 
@@ -342,7 +415,7 @@ namespace dealii::MGTools
     // vertical communication
     {
       const auto [cells_local, cells_remote, comm] =
-        vertical_communication_cost(trias);
+        vertical_communication_cost(trias, nested);
 
       std::vector<types::global_dof_index> cells_local_min(cells_local.size());
       std::vector<types::global_dof_index> cells_local_max(cells_local.size());

@@ -1996,7 +1996,9 @@ solve_with_global_coarsening_non_nested(
 
   if (verbose)
     {
-      const auto stats = MGTools::print_multigrid_statistics(triangulations);
+      const auto stats =
+        MGTools::print_multigrid_statistics(triangulations,
+                                            false /*nested=false*/);
       for (const auto &stat : stats)
         {
           table.add_value(stat.first, stat.second);
