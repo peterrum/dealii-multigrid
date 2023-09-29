@@ -830,8 +830,7 @@ template <int dim,
           typename SystemMatrixType,
           typename LevelMatrixType,
           typename MGTransferTypeFine,
-          typename MGTransferTypeCoarse,
-          typename MGTwoLevels = int>
+          typename MGTransferTypeCoarse>
 static void
 mg_solve(SolverControl &                              solver_control,
          typename SystemMatrixType::VectorType &      dst,
@@ -846,8 +845,7 @@ mg_solve(SolverControl &                              solver_control,
          const unsigned int                           offset,
          const bool                                   verbose,
          const MPI_Comm &                             sub_comm,
-         ConvergenceTable &                           table,
-         const MGTwoLevels &                          two_levels = 0)
+         ConvergenceTable &                           table)
 {
   AssertThrow(mg_data.smoother.type == "chebyshev", ExcNotImplemented());
 
@@ -1191,47 +1189,6 @@ mg_solve(SolverControl &                              solver_control,
     };
   };
 
-  std::pair<double, std::chrono::time_point<std::chrono::system_clock>>
-    non_nested_evaluation_pro, non_nested_evaluation_res;
-
-  // Measure evaluations in non-nested case
-  if constexpr (!std::is_same_v<int, MGTwoLevels>)
-    {
-      const auto timer_evaluation_prolongation =
-        [&non_nested_evaluation_pro](const bool flag) {
-          if (flag)
-            non_nested_evaluation_pro.second = std::chrono::system_clock::now();
-          else
-            non_nested_evaluation_pro.first +=
-              std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::system_clock::now() -
-                non_nested_evaluation_pro.second)
-                .count() /
-              1e9;
-        };
-      const auto timer_evaluation_restriction =
-        [&non_nested_evaluation_res](const bool flag) {
-          if (flag)
-            non_nested_evaluation_res.second = std::chrono::system_clock::now();
-          else
-            non_nested_evaluation_res.first +=
-              std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::system_clock::now() -
-                non_nested_evaluation_res.second)
-                .count() /
-              1e9;
-        };
-
-      for (unsigned int l = min_level; l < max_level; ++l)
-        {
-          two_levels[l + 1]->connect_prolongation_cell_loop(
-            timer_evaluation_prolongation);
-          two_levels[l + 1]->connect_restriction_cell_loop(
-            timer_evaluation_restriction);
-        }
-    }
-
-
   {
     mg_fine.connect_pre_smoother_step(
       create_mg_timer_function(0, "pre_smoother_step"));
@@ -1453,18 +1410,6 @@ mg_solve(SolverControl &                              solver_control,
                   mg_precon_timers[1].first / solver_control.last_step());
   table.set_scientific("time_to_global", true);
 
-  if constexpr (!std::is_same_v<int, MGTwoLevels>)
-    {
-      table.add_value("time_res_evaluation",
-                      non_nested_evaluation_res.first /
-                        solver_control.last_step());
-      table.set_scientific("time_res_evaluation", true);
-      table.add_value("time_pro_evaluation",
-                      non_nested_evaluation_pro.first /
-                        solver_control.last_step());
-      table.set_scientific("time_pro_evaluation", true);
-    }
-
   monitor("mg_solve::5");
 }
 
@@ -1473,8 +1418,7 @@ mg_solve(SolverControl &                              solver_control,
 template <int dim,
           typename SystemMatrixType,
           typename LevelMatrixType,
-          typename MGTransferType,
-          typename MGTwoLevels = int>
+          typename MGTransferType>
 static void
 mg_solve(SolverControl &                              solver_control,
          typename SystemMatrixType::VectorType &      dst,
@@ -1486,8 +1430,7 @@ mg_solve(SolverControl &                              solver_control,
          const MGTransferType &                       mg_transfer,
          const bool                                   verbose,
          const MPI_Comm &                             sub_comm,
-         ConvergenceTable &                           table,
-         const MGTwoLevels &                          two_levels = 0)
+         ConvergenceTable &                           table)
 {
   mg_solve<dim, SystemMatrixType, LevelMatrixType, MGTransferType>(
     solver_control,
@@ -1503,8 +1446,7 @@ mg_solve(SolverControl &                              solver_control,
     0,
     verbose,
     sub_comm,
-    table,
-    two_levels);
+    table);
 }
 
 
@@ -1720,6 +1662,8 @@ solve_with_global_coarsening(
   if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
     MPI_Comm_free(&sub_comm);
 
+  table.add_value("time_res_evaluation", 0);
+  table.add_value("time_pro_evaluation", 0);
   if (verbose)
     {
       const auto stats = MGTools::print_multigrid_statistics(triangulations);
@@ -1929,6 +1873,33 @@ solve_with_global_coarsening_non_nested(
 
     monitor("solve_with_global_coarsening_non_nested::3");
 
+    std::pair<double, std::chrono::time_point<std::chrono::system_clock>>
+      non_nested_evaluation_pro, non_nested_evaluation_res;
+    // Measure evaluations in non-nested case
+    const auto timer_evaluation_prolongation = [&non_nested_evaluation_pro](
+                                                 const bool flag) {
+      if (flag)
+        non_nested_evaluation_pro.second = std::chrono::system_clock::now();
+      else
+        non_nested_evaluation_pro.first +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now() - non_nested_evaluation_pro.second)
+            .count() /
+          1e9;
+    };
+
+    const auto timer_evaluation_restriction = [&non_nested_evaluation_res](
+                                                const bool flag) {
+      if (flag)
+        non_nested_evaluation_res.second = std::chrono::system_clock::now();
+      else
+        non_nested_evaluation_res.first +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now() - non_nested_evaluation_res.second)
+            .count() /
+          1e9;
+    };
+
     for (unsigned int l = min_level; l < max_level; ++l)
       {
         transfers[l + 1] = std::make_shared<
@@ -1940,6 +1911,10 @@ solve_with_global_coarsening_non_nested(
                                  *mappings[l],
                                  constraints[l + 1],
                                  constraints[l]);
+        transfers[l + 1]->connect_restriction_cell_loop(
+          timer_evaluation_restriction);
+        transfers[l + 1]->connect_prolongation_cell_loop(
+          timer_evaluation_prolongation);
       }
 
     ConvergenceTable table_;
@@ -1985,10 +1960,18 @@ solve_with_global_coarsening_non_nested(
              transfer,
              verbose,
              sub_comm,
-             table,
-             transfers);
+             table);
 
     monitor("solve_with_global_coarsening_non_nested::5");
+
+    table.add_value("time_res_evaluation",
+                    non_nested_evaluation_res.first /
+                      solver_control.last_step());
+    table.set_scientific("time_res_evaluation", true);
+    table.add_value("time_pro_evaluation",
+                    non_nested_evaluation_pro.first /
+                      solver_control.last_step());
+    table.set_scientific("time_pro_evaluation", true);
   }
 
   if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
@@ -2200,6 +2183,8 @@ solve_with_local_smoothing(const std::string &                type,
 
   monitor("solve_with_local_smoothing::3");
 
+  table.add_value("time_res_evaluation", 0);
+  table.add_value("time_pro_evaluation", 0);
   if (verbose)
     {
       const auto stats =
@@ -2297,7 +2282,8 @@ solve_with_amg(const std::string &        type,
   table.add_value("time_post", 0);
   table.add_value("time_to_mg", 0);
   table.add_value("time_to_global", 0);
-
+  table.add_value("time_res_evaluation", 0);
+  table.add_value("time_pro_evaluation", 0);
   table.add_value("workload_eff", 0);
   table.add_value("workload_path_max", 0);
   table.add_value("vertical_eff", 0);
