@@ -220,7 +220,7 @@ namespace dealii::MGTools
                 std::function<bool(
                   const typename Triangulation<dim>::active_cell_iterator &)>(
                   locally_owned_cell_predicate),
-                1,
+                0 /*refinement_level=0*/,
                 false,
                 4);
             std::vector<std::vector<BoundingBox<dim>>> global_bboxes;
