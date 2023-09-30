@@ -826,11 +826,14 @@ namespace dealii
 
 
 
-template <int dim,
-          typename SystemMatrixType,
-          typename LevelMatrixType,
-          typename MGTransferTypeFine,
-          typename MGTransferTypeCoarse>
+template <
+  int dim,
+  typename SystemMatrixType,
+  typename LevelMatrixType,
+  typename MGTransferTypeFine,
+  typename MGTransferTypeCoarse,
+  typename MGTwoLevels =
+    MGTwoLevelTransferNonNested<dim, typename SystemMatrixType::VectorType>>
 static void
 mg_solve(SolverControl &                              solver_control,
          typename SystemMatrixType::VectorType &      dst,
@@ -845,7 +848,8 @@ mg_solve(SolverControl &                              solver_control,
          const unsigned int                           offset,
          const bool                                   verbose,
          const MPI_Comm &                             sub_comm,
-         ConvergenceTable &                           table)
+         ConvergenceTable &                           table,
+         const MGLevelObject<std::shared_ptr<MGTwoLevels>> &twolevels = {})
 {
   AssertThrow(mg_data.smoother.type == "chebyshev", ExcNotImplemented());
 
@@ -1243,6 +1247,45 @@ mg_solve(SolverControl &                              solver_control,
   preconditioner.connect_transfer_to_mg(create_mg_precon_timer_function(0));
   preconditioner.connect_transfer_to_global(create_mg_precon_timer_function(1));
 
+  // Measure evaluations in non-nested case
+  std::pair<double, std::chrono::time_point<std::chrono::system_clock>>
+    non_nested_evaluation_pro, non_nested_evaluation_res;
+
+  const auto timer_evaluation_prolongation =
+    [&non_nested_evaluation_pro](const bool flag) {
+      if (flag)
+        non_nested_evaluation_pro.second = std::chrono::system_clock::now();
+      else
+        non_nested_evaluation_pro.first +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now() - non_nested_evaluation_pro.second)
+            .count() /
+          1e9;
+    };
+
+  const auto timer_evaluation_restriction =
+    [&non_nested_evaluation_res](const bool flag) {
+      if (flag)
+        non_nested_evaluation_res.second = std::chrono::system_clock::now();
+      else
+        non_nested_evaluation_res.first +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now() - non_nested_evaluation_res.second)
+            .count() /
+          1e9;
+    };
+  if (twolevels.n_levels() > 1)
+    {
+      for (unsigned int l = twolevels.min_level(); l < twolevels.max_level();
+           ++l)
+        {
+          twolevels[l + 1]->connect_restriction_cell_loop(
+            timer_evaluation_restriction);
+          twolevels[l + 1]->connect_prolongation_cell_loop(
+            timer_evaluation_prolongation);
+        }
+    }
+
   std::vector<double> times(n_repetitions);
 
   for (; counter < n_repetitions; ++counter)
@@ -1410,6 +1453,13 @@ mg_solve(SolverControl &                              solver_control,
                   mg_precon_timers[1].first / solver_control.last_step());
   table.set_scientific("time_to_global", true);
 
+  table.add_value("time_res_evaluation",
+                  non_nested_evaluation_res.first / solver_control.last_step());
+  table.set_scientific("time_res_evaluation", true);
+  table.add_value("time_pro_evaluation",
+                  non_nested_evaluation_pro.first / solver_control.last_step());
+  table.set_scientific("time_pro_evaluation", true);
+
   monitor("mg_solve::5");
 }
 
@@ -1446,7 +1496,8 @@ mg_solve(SolverControl &                              solver_control,
     0,
     verbose,
     sub_comm,
-    table);
+    table,
+    {});
 }
 
 
@@ -1662,8 +1713,6 @@ solve_with_global_coarsening(
   if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
     MPI_Comm_free(&sub_comm);
 
-  table.add_value("time_res_evaluation", 0);
-  table.add_value("time_pro_evaluation", 0);
   if (verbose)
     {
       const auto stats = MGTools::print_multigrid_statistics(triangulations);
@@ -1873,33 +1922,6 @@ solve_with_global_coarsening_non_nested(
 
     monitor("solve_with_global_coarsening_non_nested::3");
 
-    std::pair<double, std::chrono::time_point<std::chrono::system_clock>>
-      non_nested_evaluation_pro, non_nested_evaluation_res;
-    // Measure evaluations in non-nested case
-    const auto timer_evaluation_prolongation = [&non_nested_evaluation_pro](
-                                                 const bool flag) {
-      if (flag)
-        non_nested_evaluation_pro.second = std::chrono::system_clock::now();
-      else
-        non_nested_evaluation_pro.first +=
-          std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now() - non_nested_evaluation_pro.second)
-            .count() /
-          1e9;
-    };
-
-    const auto timer_evaluation_restriction = [&non_nested_evaluation_res](
-                                                const bool flag) {
-      if (flag)
-        non_nested_evaluation_res.second = std::chrono::system_clock::now();
-      else
-        non_nested_evaluation_res.first +=
-          std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now() - non_nested_evaluation_res.second)
-            .count() /
-          1e9;
-    };
-
     for (unsigned int l = min_level; l < max_level; ++l)
       {
         transfers[l + 1] = std::make_shared<
@@ -1911,10 +1933,6 @@ solve_with_global_coarsening_non_nested(
                                  *mappings[l],
                                  constraints[l + 1],
                                  constraints[l]);
-        transfers[l + 1]->connect_restriction_cell_loop(
-          timer_evaluation_restriction);
-        transfers[l + 1]->connect_prolongation_cell_loop(
-          timer_evaluation_prolongation);
       }
 
     ConvergenceTable table_;
@@ -1955,23 +1973,18 @@ solve_with_global_coarsening_non_nested(
              src,
              mg_data,
              dof_handler_in,
+             dof_handler_in,
              op,
              operators,
              transfer,
+             transfer,
+             0,
              verbose,
              sub_comm,
-             table);
+             table,
+             transfers);
 
     monitor("solve_with_global_coarsening_non_nested::5");
-
-    table.add_value("time_res_evaluation",
-                    non_nested_evaluation_res.first /
-                      solver_control.last_step());
-    table.set_scientific("time_res_evaluation", true);
-    table.add_value("time_pro_evaluation",
-                    non_nested_evaluation_pro.first /
-                      solver_control.last_step());
-    table.set_scientific("time_pro_evaluation", true);
   }
 
   if (comm != sub_comm && sub_comm != MPI_COMM_NULL)
@@ -2167,7 +2180,8 @@ solve_with_local_smoothing(const std::string &                type,
              dof_handler_in.get_triangulation().n_global_levels(),
              verbose,
              dof_handlers.front().get_communicator(),
-             table);
+             table,
+             {});
   else
     mg_solve(solver_control,
              dst,
@@ -2183,8 +2197,6 @@ solve_with_local_smoothing(const std::string &                type,
 
   monitor("solve_with_local_smoothing::3");
 
-  table.add_value("time_res_evaluation", 0);
-  table.add_value("time_pro_evaluation", 0);
   if (verbose)
     {
       const auto stats =
