@@ -149,6 +149,12 @@ public:
     return matrix_free.get_vector_partitioner();
   }
 
+  const DoFHandler<dim_> &
+  get_dof_handler() const
+  {
+    return matrix_free.get_dof_handler();
+  }
+
   virtual void
   vmult(VectorType &dst, const VectorType &src) const
   {
@@ -727,6 +733,12 @@ public:
   get_vector_partitioner() const
   {
     return matrix_free.get_vector_partitioner();
+  }
+
+  const DoFHandler<dim_> &
+  get_dof_handler() const
+  {
+    return matrix_free.get_dof_handler();
   }
 
   virtual void
