@@ -1832,7 +1832,7 @@ solve_with_global_coarsening_non_nested(
     if constexpr (std::is_same_v<OperatorType,
                                  ElasticityOperator<dim, n_components, Number>>)
       {
-        data.enforce_all_points_found = false;
+        data.enforce_all_points_found = true;
 
         // wrench
         if (dof_handler_in.get_fe().degree >= 3)
@@ -2243,6 +2243,18 @@ solve_with_amg(const std::string &        type,
     {
       TrilinosWrappers::PreconditionAMG                 preconditioner;
       TrilinosWrappers::PreconditionAMG::AdditionalData data;
+      if constexpr (
+        std::is_same_v<
+          OperatorType,
+          ElasticityOperator<3, 3, typename OperatorType::value_type>>)
+        {
+          std::vector<std::vector<bool>> constant_modes;
+          DoFTools::extract_constant_modes(op.get_dof_handler(),
+                                           ComponentMask(),
+                                           constant_modes);
+          data.constant_modes        = constant_modes;
+          data.aggregation_threshold = 1e-3;
+        }
       preconditioner.initialize(op.get_trilinos_system_matrix(), data);
 
       {
