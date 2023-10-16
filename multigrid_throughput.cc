@@ -1158,7 +1158,9 @@ mg_solve(SolverControl &                              solver_control,
         .solve(fine_matrix, dst, src, preconditioner);
     }
   catch (const SolverControl::NoConvergence &)
-    {}
+    {
+      AssertThrow(false, ExcMessage("No convergence, aborting the program"));
+    }
 
   const unsigned int n_repetitions = mg_data.n_repetitions;
   unsigned int       counter       = 0;
@@ -2253,6 +2255,7 @@ solve_with_amg(const std::string &        type,
                                            ComponentMask(),
                                            constant_modes);
           data.constant_modes        = constant_modes;
+          data.higher_order_elements = false;
           data.aggregation_threshold = 1e-3;
         }
       preconditioner.initialize(op.get_trilinos_system_matrix(), data);
