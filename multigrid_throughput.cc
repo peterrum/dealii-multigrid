@@ -64,6 +64,33 @@ static std::vector<std::string> geometries = {"l_shape",
                                               "wrench",
                                               "wrench_tetrahedral"};
 
+template <int dim,
+          typename Number,
+          typename OperatorType = ElasticityOperator<dim, 3, Number>>
+struct PMG_CoarseGridProxy
+{
+  PMG_CoarseGridProxy(
+    DoFHandler<dim> *               _coarse_dh,
+    MGLevelObject<DoFHandler<dim>> *_dhs,
+    MGLevelObject<AffineConstraints<typename OperatorType::value_type>>
+      *                          _constraints,
+    MGLevelObject<OperatorType> *_operators)
+    : coarse_dh{_coarse_dh}
+    , dhs{_dhs}
+    , constraints{_constraints}
+    , operators{_operators}
+  {}
+
+  PMG_CoarseGridProxy() = default;
+
+  SmartPointer<DoFHandler<dim>>                coarse_dh;
+  SmartPointer<MGLevelObject<DoFHandler<dim>>> dhs;
+  SmartPointer<
+    MGLevelObject<AffineConstraints<typename OperatorType::value_type>>>
+                                            constraints;
+  SmartPointer<MGLevelObject<OperatorType>> operators;
+};
+
 template <int dim>
 class GaussianSolution : public dealii::Function<dim>
 {
@@ -849,7 +876,10 @@ mg_solve(SolverControl &                              solver_control,
          const bool                                   verbose,
          const MPI_Comm &                             sub_comm,
          ConvergenceTable &                           table,
-         const MGLevelObject<std::shared_ptr<MGTwoLevels>> &twolevels = {})
+         const MGLevelObject<std::shared_ptr<MGTwoLevels>> &twolevels = {},
+         const PMG_CoarseGridProxy<dim,
+                                   typename LevelMatrixType::value_type,
+                                   LevelMatrixType> &       pmg_proxy = {})
 {
   AssertThrow(mg_data.smoother.type == "chebyshev", ExcNotImplemented());
 
@@ -923,8 +953,190 @@ mg_solve(SolverControl &                              solver_control,
 #endif
 
   std::unique_ptr<MGCoarseGridBase<VectorType>> mg_coarse;
+  ReductionControl coarse_grid_solver_control_pmg(mg_data.coarse_solver.maxiter,
+                                                  mg_data.coarse_solver.abstol,
+                                                  mg_data.coarse_solver.reltol,
+                                                  false,
+                                                  false);
 
-  if (mg_data.coarse_solver.type == "cg")
+  std::unique_ptr<SolverCG<VectorType>> coarse_grid_solver_pmg;
+  coarse_grid_solver_pmg =
+    std::make_unique<SolverCG<VectorType>>(coarse_grid_solver_control_pmg);
+
+  std::unique_ptr<TrilinosWrappers::PreconditionAMG> precondition_amg_poly;
+  std::unique_ptr<
+    PreconditionMG<dim,
+                   VectorType,
+                   MGTransferGlobalCoarsening<
+                     dim,
+                     typename ElasticityOperator<dim, 3, Number>::VectorType>>>
+    multigrid_preconditioner;
+
+  std::unique_ptr<MGTransferGlobalCoarsening<
+    dim,
+    typename ElasticityOperator<dim, 3, Number>::VectorType>>
+    transfer_pmg;
+
+  std::unique_ptr<mg::Matrix<VectorType>> pmg_matrix;
+
+  std::unique_ptr<mg::SmootherRelaxation<SmootherType, VectorType>>
+    pmg_smoother;
+
+  std::unique_ptr<Multigrid<VectorType>>        pmg;
+  std::unique_ptr<MGCoarseGridBase<VectorType>> amg_coarse;
+
+  std::unique_ptr<MGLevelObject<MGTwoLevelTransfer<dim, VectorType>>>
+    pmg_transfers;
+
+
+  if (mg_data.coarse_solver.type == "PMG")
+    {
+      Assert(
+        (std::is_same_v<LevelMatrixType, ElasticityOperator<dim, 3, Number>>),
+        ExcMessage(
+          "PMG as CoarseGridSolver implemented for ElasticityOperator only!"));
+      const auto &pmg_dof_handlers = *(pmg_proxy.dhs);
+      const auto &pmg_constraints  = *(pmg_proxy.constraints);
+      const auto &pmg_operators    = *(pmg_proxy.operators);
+
+      if constexpr (OPERATOR == 1)
+        {
+          AssertDimension(dim, 3);
+          using OperatorType = ElasticityOperator<dim, 3, Number>;
+
+          // CG with p-multigrid as CoarseGrid solver. At the coarsest level use
+          // AMG.
+          const auto pmg_level_degrees = MGTransferGlobalCoarseningTools::
+            create_polynomial_coarsening_sequence(
+              pmg_proxy.coarse_dh->get_fe().degree,
+              MGTransferGlobalCoarseningTools::
+                PolynomialCoarseningSequenceType::decrease_by_one);
+
+          unsigned int pmg_min_level = 0;
+          unsigned int pmg_max_level = pmg_level_degrees.size() - 1;
+
+          pmg_transfers = std::make_unique<
+            MGLevelObject<MGTwoLevelTransfer<dim, VectorType>>>(pmg_min_level,
+                                                                pmg_max_level);
+
+          // set up transfer operator
+          for (unsigned int l = pmg_min_level; l < pmg_max_level; ++l)
+            (*pmg_transfers)[l + 1].reinit(pmg_dof_handlers[l + 1],
+                                           pmg_dof_handlers[l],
+                                           pmg_constraints[l + 1],
+                                           pmg_constraints[l]);
+
+
+          transfer_pmg = std::make_unique<MGTransferGlobalCoarsening<
+            dim,
+            typename ElasticityOperator<dim, 3, Number>::VectorType>>(
+            *pmg_transfers, [&](const auto l, auto &vec) {
+              pmg_operators[l].initialize_dof_vector(vec);
+            });
+
+          //  Use AMG (Trilinos) as CoarseGridSolver.
+          if (sub_comm != MPI_COMM_NULL)
+            {
+              TrilinosWrappers::PreconditionAMG::AdditionalData amg_data;
+              amg_data.smoother_sweeps = mg_data.coarse_solver.smoother_sweeps;
+              amg_data.n_cycles        = mg_data.coarse_solver.n_cycles;
+              amg_data.smoother_type =
+                mg_data.coarse_solver.smoother_type.c_str();
+              amg_data.output_details = true;
+
+              std::vector<std::vector<bool>> constant_modes;
+              DoFTools::extract_constant_modes(pmg_dof_handlers[pmg_min_level],
+                                               ComponentMask(),
+                                               constant_modes);
+              amg_data.constant_modes = constant_modes;
+              // amg_data.aggregation_threshold = 1e-3;
+
+              Teuchos::ParameterList              parameter_list;
+              std::unique_ptr<Epetra_MultiVector> distributed_constant_modes;
+              amg_data.set_parameters(parameter_list,
+                                      distributed_constant_modes,
+                                      pmg_operators[pmg_min_level]
+                                        .get_trilinos_system_matrix(sub_comm));
+              parameter_list.set("repartition: enable", 1);
+              parameter_list.set("repartition: max min ratio", 1.3);
+              parameter_list.set("repartition: min per proc", 300);
+              parameter_list.set("repartition: partitioner", "Zoltan");
+              parameter_list.set("repartition: Zoltan dimensions", 3);
+
+
+              precondition_amg_poly =
+                std::make_unique<TrilinosWrappers::PreconditionAMG>();
+              precondition_amg_poly->initialize(
+                pmg_operators[pmg_min_level].get_trilinos_system_matrix(
+                  sub_comm),
+                parameter_list);
+              amg_coarse = std::make_unique<MGCoarseGridApplyPreconditioner<
+                VectorType,
+                TrilinosWrappers::PreconditionAMG>>(*precondition_amg_poly);
+            }
+          else
+            {
+              amg_coarse = std::make_unique<MGCoarseGridApplyPreconditioner<
+                VectorType,
+                TrilinosWrappers::PreconditionAMG>>();
+            }
+
+
+          // Initialize level operators.
+          pmg_matrix = std::make_unique<mg::Matrix<VectorType>>(pmg_operators);
+          // Initialize smoothers.
+          MGLevelObject<typename SmootherType::AdditionalData>
+            pmg_smoother_data(pmg_min_level, pmg_max_level);
+
+          for (unsigned int level = pmg_min_level; level <= pmg_max_level;
+               ++level)
+            {
+              pmg_smoother_data[level].preconditioner =
+                std::make_shared<SmootherPreconditionerType>();
+              pmg_operators[level].compute_inverse_diagonal(
+                pmg_smoother_data[level].preconditioner->get_vector());
+              pmg_smoother_data[level].smoothing_range =
+                mg_data.smoother.smoothing_range;
+              pmg_smoother_data[level].degree = mg_data.smoother.degree;
+              pmg_smoother_data[level].eig_cg_n_iterations =
+                mg_data.smoother.eig_cg_n_iterations;
+            }
+
+
+          pmg_smoother = std::make_unique<
+            mg::SmootherRelaxation<SmootherType, VectorType>>();
+          pmg_smoother->initialize(pmg_operators, pmg_smoother_data);
+
+          // Create multigrid object. Notice: coarse solver is AMG
+          pmg = std::make_unique<Multigrid<VectorType>>(*pmg_matrix,
+                                                        *amg_coarse,
+                                                        *transfer_pmg,
+                                                        *pmg_smoother,
+                                                        *pmg_smoother);
+
+          multigrid_preconditioner = std::make_unique<PreconditionMG<
+            dim,
+            VectorType,
+            MGTransferGlobalCoarsening<
+              dim,
+              typename ElasticityOperator<dim, 3, Number>::VectorType>>>(
+            pmg_dof_handlers[pmg_max_level], *pmg, *transfer_pmg);
+
+          mg_coarse = std::make_unique<MGCoarseGridIterativeSolver<
+            VectorType,
+            SolverCG<VectorType>,
+            LevelMatrixType,
+            std::remove_reference_t<decltype(*multigrid_preconditioner)>>>(
+            *coarse_grid_solver_pmg,
+            pmg_operators[pmg_max_level],
+            *multigrid_preconditioner);
+        }
+      else
+        {
+          AssertThrow(false, ExcNotImplemented());
+        }
+    }
+  else if (mg_data.coarse_solver.type == "cg")
     {
       // CG with identity matrix as preconditioner
 
@@ -968,6 +1180,14 @@ mg_solve(SolverControl &                              solver_control,
       amg_data.n_cycles        = mg_data.coarse_solver.n_cycles;
       amg_data.smoother_type   = mg_data.coarse_solver.smoother_type.c_str();
 
+      std::vector<std::vector<bool>> constant_modes;
+      DoFTools::extract_constant_modes(*(pmg_proxy.coarse_dh),
+                                       ComponentMask(),
+                                       constant_modes);
+      amg_data.constant_modes = constant_modes;
+      if (dof_fine.get_fe().degree >= 2)
+        amg_data.higher_order_elements = true;
+
       // CG with AMG as preconditioner
       precondition_amg.initialize(
         mg_matrices[min_level].get_trilinos_system_matrix(), amg_data);
@@ -998,6 +1218,13 @@ mg_solve(SolverControl &                              solver_control,
           amg_data.n_cycles        = mg_data.coarse_solver.n_cycles;
           amg_data.smoother_type  = mg_data.coarse_solver.smoother_type.c_str();
           amg_data.output_details = true;
+          std::vector<std::vector<bool>> constant_modes;
+          DoFTools::extract_constant_modes(*(pmg_proxy.coarse_dh),
+                                           ComponentMask(),
+                                           constant_modes);
+          amg_data.constant_modes = constant_modes;
+          if (dof_fine.get_fe().degree >= 2)
+            amg_data.higher_order_elements = true;
 
           Teuchos::ParameterList              parameter_list;
           std::unique_ptr<Epetra_MultiVector> distributed_constant_modes;
@@ -1159,7 +1386,8 @@ mg_solve(SolverControl &                              solver_control,
     }
   catch (const SolverControl::NoConvergence &)
     {
-      AssertThrow(false, ExcMessage("No convergence, aborting the program"));
+      AssertThrow(false,
+                  ExcMessage("Solver did not converge. Aborting the program."));
     }
 
   const unsigned int n_repetitions = mg_data.n_repetitions;
@@ -1498,8 +1726,7 @@ mg_solve(SolverControl &                              solver_control,
     0,
     verbose,
     sub_comm,
-    table,
-    {});
+    table);
 }
 
 
@@ -1839,8 +2066,8 @@ solve_with_global_coarsening_non_nested(
         // wrench
         if (dof_handler_in.get_fe().degree >= 3)
           {
-            data.tolerance   = .5;
-            data.rtree_level = 3;
+            data.tolerance   = 1e-1; // 1e-1
+            data.rtree_level = 2;    // 2,1
           }
         else
           {
@@ -1968,6 +2195,95 @@ solve_with_global_coarsening_non_nested(
                                     false,
                                     false);
 
+
+    std::unique_ptr<MGLevelObject<ElasticityOperator<dim, 3, Number>>>
+                                                              pmg_operators;
+    std::unique_ptr<MGLevelObject<AffineConstraints<Number>>> pmg_constraints;
+    std::unique_ptr<MGLevelObject<DoFHandler<dim>>>           pmg_dof_handlers;
+    std::unique_ptr<PMG_CoarseGridProxy<dim, Number, OperatorType>> pmg_proxy;
+
+    if constexpr (OPERATOR == 1)
+      {
+        if (mg_data.coarse_solver.type == "PMG")
+          { // Setup pMG
+            const auto level_degrees = MGTransferGlobalCoarseningTools::
+              create_polynomial_coarsening_sequence(
+                dof_handlers[0].get_fe().degree,
+                MGTransferGlobalCoarseningTools::
+                  PolynomialCoarseningSequenceType::decrease_by_one);
+
+
+            const unsigned int min_level = 0;
+            const unsigned int max_level = level_degrees.size() - 1;
+
+            pmg_dof_handlers = std::make_unique<MGLevelObject<DoFHandler<dim>>>(
+              min_level, max_level, dof_handlers[0].get_triangulation());
+            pmg_constraints =
+              std::make_unique<MGLevelObject<AffineConstraints<Number>>>(
+                min_level, max_level);
+            pmg_operators =
+              std::make_unique<MGLevelObject<OperatorType>>(min_level,
+                                                            max_level);
+
+            std::unique_ptr<Mapping<dim>>  mapping;
+            std::unique_ptr<FESystem<dim>> fe;
+            std::unique_ptr<QGauss<dim>>   quad;
+
+            // set up levels
+            for (auto l = min_level; l <= max_level; ++l)
+              {
+                auto &dof_handler = (*pmg_dof_handlers)[l];
+                auto &constraint  = (*pmg_constraints)[l];
+                auto &op          = (*pmg_operators)[l];
+
+                mapping = std::make_unique<MappingQ<dim>>(1);
+                quad    = std::make_unique<QGauss<dim>>(level_degrees[l] + 1);
+                fe =
+                  std::make_unique<FESystem<dim>>(FE_Q<dim>{level_degrees[l]},
+                                                  dim);
+                // set up dofhandler
+                dof_handler.distribute_dofs(*fe); // use level_degrees again
+
+                // set up constraints
+                const IndexSet locally_relevant_dofs =
+                  DoFTools::extract_locally_relevant_dofs(dof_handler);
+                constraint.reinit(locally_relevant_dofs);
+
+                // ElasticityOperator has 1 as Dirichlet_id
+                VectorTools::interpolate_boundary_values(
+                  *mapping,
+                  dof_handler,
+                  1,
+                  Functions::ZeroFunction<dim,
+                                          typename OperatorType::value_type>(
+                    dof_handler.get_fe().n_components()),
+                  constraint);
+
+                DoFTools::make_hanging_node_constraints(dof_handler,
+                                                        constraint);
+                constraint.close();
+
+                // set up operator
+                op.reinit(*mapping, dof_handler, *quad, constraint);
+              }
+
+            pmg_proxy = std::make_unique<
+              PMG_CoarseGridProxy<dim,
+                                  typename OperatorType::value_type,
+                                  OperatorType>>(&dof_handlers[0],
+                                                 pmg_dof_handlers.get(),
+                                                 pmg_constraints.get(),
+                                                 pmg_operators.get());
+          }
+      }
+    else if constexpr (OPERATOR == 0)
+      {
+        pmg_proxy = std::make_unique<
+          PMG_CoarseGridProxy<dim,
+                              typename OperatorType::value_type,
+                              OperatorType>>();
+      }
+
     MPI_Barrier(MPI_COMM_WORLD);
 
     mg_solve(solver_control,
@@ -1984,7 +2300,8 @@ solve_with_global_coarsening_non_nested(
              verbose,
              sub_comm,
              table,
-             transfers);
+             transfers,
+             *pmg_proxy);
 
     monitor("solve_with_global_coarsening_non_nested::5");
   }
@@ -2254,8 +2571,9 @@ solve_with_amg(const std::string &        type,
           DoFTools::extract_constant_modes(op.get_dof_handler(),
                                            ComponentMask(),
                                            constant_modes);
-          data.constant_modes        = constant_modes;
-          data.higher_order_elements = false;
+          data.constant_modes = constant_modes;
+          if (op.get_dof_handler().get_fe().degree >= 2)
+            data.higher_order_elements = true;
           data.aggregation_threshold = 1e-3;
         }
       preconditioner.initialize(op.get_trilinos_system_matrix(), data);
