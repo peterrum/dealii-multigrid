@@ -133,12 +133,9 @@ namespace dealii::MGTools
     const unsigned int n_global_levels = trias.size();
     std::vector<types::global_dof_index> cells_local(n_global_levels);
     std::vector<types::global_dof_index> cells_remote(n_global_levels);
-
+    const unsigned int my_rank = Utilities::MPI::this_mpi_process(communicator);
     if (nested)
       {
-        const unsigned int my_rank =
-          Utilities::MPI::this_mpi_process(communicator);
-
         for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
           {
             const auto &tria_coarse = *trias[lvl];
@@ -211,16 +208,17 @@ namespace dealii::MGTools
             const auto &tria_coarse = *trias[lvl];
             const auto &tria_fine   = *trias[lvl + 1];
 
-            GridTools::Cache<dim> cache_fine(tria_fine);
-            const auto &          mapping = cache_fine.get_mapping();
+            GridTools::Cache<dim>             cache_coarse(tria_coarse);
+            const MappingQ1<dim> &            mapping{};
             IteratorFilters::LocallyOwnedCell locally_owned_cell_predicate;
-            std::vector<BoundingBox<dim>>     local_bbox =
+
+            std::vector<BoundingBox<dim>> local_bbox =
               GridTools::compute_mesh_predicate_bounding_box(
                 tria_coarse,
                 std::function<bool(
                   const typename Triangulation<dim>::active_cell_iterator &)>(
                   locally_owned_cell_predicate),
-                0 /*refinement_level=0*/,
+                0 /*refinement_level=0, triangulations are all independent*/,
                 false,
                 4);
             std::vector<std::vector<BoundingBox<dim>>> global_bboxes;
@@ -242,16 +240,18 @@ namespace dealii::MGTools
 
             const auto &output_tuple =
               GridTools::distributed_compute_point_locations(
-                cache_fine, locally_owned_points, global_bboxes, tol);
+                cache_coarse, locally_owned_points, global_bboxes, tol);
 
             const auto &maps   = std::get<2>(output_tuple);
             const auto &points = std::get<3>(output_tuple);
+            const auto &owners = std::get<4>(output_tuple);
             for (unsigned int i = 0; i < points.size(); ++i)
               {
                 for (unsigned int j = 0; j < maps[i].size(); ++j)
                   {
-                    if ((locally_owned_points[maps[i][j]] - points[i][j])
-                          .norm() < tol)
+                    // if ((locally_owned_points[maps[i][j]] - points[i][j])
+                    //       .norm() < tol)
+                    if (owners[i][j] == my_rank)
                       ++cells_local[lvl + 1];
                     else
                       ++cells_remote[lvl + 1];
