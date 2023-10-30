@@ -1181,10 +1181,13 @@ mg_solve(SolverControl &                              solver_control,
       amg_data.smoother_type   = mg_data.coarse_solver.smoother_type.c_str();
 
       std::vector<std::vector<bool>> constant_modes;
-      DoFTools::extract_constant_modes(*(pmg_proxy.coarse_dh),
-                                       ComponentMask(),
-                                       constant_modes);
-      amg_data.constant_modes = constant_modes;
+      if (dof_fine.get_fe().n_components() > 1)
+        {
+          DoFTools::extract_constant_modes(*(pmg_proxy.coarse_dh),
+                                           ComponentMask(),
+                                           constant_modes);
+          amg_data.constant_modes = constant_modes;
+        }
       if (dof_fine.get_fe().degree >= 2)
         amg_data.higher_order_elements = true;
 
@@ -1219,10 +1222,13 @@ mg_solve(SolverControl &                              solver_control,
           amg_data.smoother_type  = mg_data.coarse_solver.smoother_type.c_str();
           amg_data.output_details = true;
           std::vector<std::vector<bool>> constant_modes;
-          DoFTools::extract_constant_modes(*(pmg_proxy.coarse_dh),
-                                           ComponentMask(),
-                                           constant_modes);
-          amg_data.constant_modes = constant_modes;
+          if (dof_fine.get_fe().n_components() > 1)
+            {
+              DoFTools::extract_constant_modes(*(pmg_proxy.coarse_dh),
+                                               ComponentMask(),
+                                               constant_modes);
+              amg_data.constant_modes = constant_modes;
+            }
           if (dof_fine.get_fe().degree >= 2)
             amg_data.higher_order_elements = true;
 
@@ -1535,7 +1541,6 @@ mg_solve(SolverControl &                              solver_control,
 
       times[counter] = time;
     }
-
   const auto min_max_avg = Utilities::MPI::min_max_avg(times, MPI_COMM_WORLD);
 
   const unsigned int min_index =
@@ -2568,10 +2573,13 @@ solve_with_amg(const std::string &        type,
           ElasticityOperator<3, 3, typename OperatorType::value_type>>)
         {
           std::vector<std::vector<bool>> constant_modes;
-          DoFTools::extract_constant_modes(op.get_dof_handler(),
-                                           ComponentMask(),
-                                           constant_modes);
-          data.constant_modes = constant_modes;
+          if (op.get_dof_handler().get_fe().n_components() > 1)
+            {
+              DoFTools::extract_constant_modes(op.get_dof_handler(),
+                                               ComponentMask(),
+                                               constant_modes);
+              data.constant_modes = constant_modes;
+            }
           if (op.get_dof_handler().get_fe().degree >= 2)
             data.higher_order_elements = true;
           data.aggregation_threshold = 1e-3;
