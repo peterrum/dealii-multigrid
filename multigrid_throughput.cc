@@ -51,6 +51,8 @@
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools.h>
 
+#include <ml_MultiLevelPreconditioner.h>
+
 #include "include/grid_generator.h"
 #include "include/mg_tools.h"
 #include "include/operator.h"
@@ -1037,32 +1039,58 @@ mg_solve(SolverControl &                              solver_control,
           //  Use AMG (Trilinos) as CoarseGridSolver.
           if (sub_comm != MPI_COMM_NULL)
             {
-              TrilinosWrappers::PreconditionAMG::AdditionalData amg_data;
-              amg_data.smoother_sweeps = mg_data.coarse_solver.smoother_sweeps;
-              amg_data.n_cycles        = mg_data.coarse_solver.n_cycles;
-              amg_data.smoother_type =
-                mg_data.coarse_solver.smoother_type.c_str();
-              amg_data.output_details = true;
-
-              std::vector<std::vector<bool>> constant_modes;
-              DoFTools::extract_constant_modes(pmg_dof_handlers[pmg_min_level],
-                                               ComponentMask(),
-                                               constant_modes);
-              amg_data.constant_modes = constant_modes;
-              // amg_data.aggregation_threshold = 1e-3;
+              AssertThrow(
+                pmg_dof_handlers[pmg_min_level].get_fe().degree == 1,
+                ExcMessage(
+                  "At the coarsest level only linear elements are allowed."));
+              // Ad-hoc null space for 3D elasticity
+              std::vector<LinearAlgebra::distributed::Vector<Number>>
+                near_null_space(6);
+              for (unsigned int i = 0; i < near_null_space.size(); ++i)
+                {
+                  near_null_space[i].reinit(
+                    pmg_operators[pmg_min_level].get_vector_partitioner(),
+                    sub_comm);
+                  const MGTools::RigidBodyMotion<dim> &rbm(i);
+                  VectorTools::interpolate(pmg_dof_handlers[pmg_min_level],
+                                           rbm,
+                                           near_null_space[i]);
+                }
 
               Teuchos::ParameterList              parameter_list;
-              std::unique_ptr<Epetra_MultiVector> distributed_constant_modes;
-              amg_data.set_parameters(parameter_list,
-                                      distributed_constant_modes,
-                                      pmg_operators[pmg_min_level]
-                                        .get_trilinos_system_matrix(sub_comm));
+              std::unique_ptr<Epetra_MultiVector> distributed_modes;
+
+              MGTools::set_elasticity_operator_nullspace<
+                typename OperatorType::value_type>(
+                parameter_list,
+                distributed_modes,
+                pmg_operators[pmg_min_level]
+                  .get_trilinos_system_matrix()
+                  .trilinos_matrix(),
+                near_null_space);
+
+              ML_Epetra::SetDefaults("SA", parameter_list);
+
+              parameter_list.set("smoother: type",
+                                 mg_data.coarse_solver.smoother_type.c_str());
+              parameter_list.set("coarse: type", "Amesos-KLU");
+              parameter_list.set("smoother: sweeps",
+                                 static_cast<int>(
+                                   mg_data.coarse_solver.smoother_sweeps));
+              parameter_list.set("cycle applications",
+                                 static_cast<int>(
+                                   mg_data.coarse_solver.n_cycles));
+              parameter_list.set("prec type", "MGV");
+              parameter_list.set("smoother: Chebyshev alpha", 10.);
+              parameter_list.set("smoother: ifpack overlap", 0);
+              parameter_list.set("aggregation: threshold", 1e-3);
+              parameter_list.set("coarse: max size", 2000);
+              parameter_list.set("ML output", 10);
               parameter_list.set("repartition: enable", 1);
               parameter_list.set("repartition: max min ratio", 1.3);
               parameter_list.set("repartition: min per proc", 300);
               parameter_list.set("repartition: partitioner", "Zoltan");
               parameter_list.set("repartition: Zoltan dimensions", 3);
-
 
               precondition_amg_poly =
                 std::make_unique<TrilinosWrappers::PreconditionAMG>();
@@ -2565,26 +2593,61 @@ solve_with_amg(const std::string &        type,
 #ifdef DEAL_II_WITH_TRILINOS
   if (type == "AMG")
     {
-      TrilinosWrappers::PreconditionAMG                 preconditioner;
-      TrilinosWrappers::PreconditionAMG::AdditionalData data;
+      TrilinosWrappers::PreconditionAMG preconditioner;
+      Teuchos::ParameterList            parameter_list;
+
       if constexpr (
         std::is_same_v<
           OperatorType,
           ElasticityOperator<3, 3, typename OperatorType::value_type>>)
         {
-          std::vector<std::vector<bool>> constant_modes;
+          ML_Epetra::SetDefaults("SA", parameter_list);
+          std::unique_ptr<Epetra_MultiVector> distributed_modes;
           if (op.get_dof_handler().get_fe().n_components() > 1)
             {
-              DoFTools::extract_constant_modes(op.get_dof_handler(),
-                                               ComponentMask(),
-                                               constant_modes);
-              data.constant_modes = constant_modes;
+              std::vector<LinearAlgebra::distributed::Vector<
+                typename OperatorType::value_type>>
+                near_null_space(6);
+              for (unsigned int i = 0; i < near_null_space.size(); ++i)
+                {
+                  near_null_space[i].reinit(op.get_vector_partitioner(),
+                                            MPI_COMM_WORLD);
+                  const MGTools::RigidBodyMotion<3> &rbm(i);
+                  VectorTools::interpolate(op.get_dof_handler(),
+                                           rbm,
+                                           near_null_space[i]);
+                }
+
+
+              MGTools::set_elasticity_operator_nullspace<
+                typename OperatorType::value_type>(
+                parameter_list,
+                distributed_modes,
+                op.get_trilinos_system_matrix().trilinos_matrix(),
+                near_null_space);
             }
+
           if (op.get_dof_handler().get_fe().degree >= 2)
-            data.higher_order_elements = true;
-          data.aggregation_threshold = 1e-3;
+            parameter_list.set("aggregation: type", "Uncoupled");
+
+          parameter_list.set("smoother: type", "Chebyshev");
+          parameter_list.set("coarse: type", "Amesos-KLU");
+          parameter_list.set("smoother: sweeps", 2);
+          parameter_list.set("cycle applications", 1);
+          parameter_list.set("prec type", "MGV");
+          parameter_list.set("smoother: Chebyshev alpha", 10.);
+          parameter_list.set("smoother: ifpack overlap", 0);
+          parameter_list.set("aggregation: threshold", 1e-3);
+          parameter_list.set("coarse: max size", 2000);
+          parameter_list.set("ML output", 0);
+          preconditioner.initialize(op.get_trilinos_system_matrix(),
+                                    parameter_list);
         }
-      preconditioner.initialize(op.get_trilinos_system_matrix(), data);
+      else
+        {
+          preconditioner.initialize(op.get_trilinos_system_matrix(),
+                                    parameter_list);
+        }
 
       {
         ScopedTimer timer(time);

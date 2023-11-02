@@ -685,4 +685,104 @@ namespace dealii::MGTools
     return trias;
 #endif
   }
+
+
+  /**
+   * Definition of the 6 Rigid body motions for 3D linear elasticity.
+   */
+  template <int dim>
+  class RigidBodyMotion : public Function<dim>
+  {
+  public:
+    RigidBodyMotion(const unsigned int type_);
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component) const override;
+
+  private:
+    const unsigned int type;
+  };
+
+
+  template <int dim>
+  RigidBodyMotion<dim>::RigidBodyMotion(const unsigned int _type)
+    : Function<dim>(dim)
+    , type(_type)
+  {
+    Assert(dim == 3, ExcNotImplemented());
+    Assert(type <= 5, ExcNotImplemented());
+  }
+
+
+
+  template <int dim>
+  double
+  RigidBodyMotion<dim>::value(const Point<dim> & p,
+                              const unsigned int component) const
+  {
+    const std::array<double, 6> modes{{static_cast<double>(component == 0),
+                                       static_cast<double>(component == 1),
+                                       static_cast<double>(component == 2),
+                                       (component == 0) ? 0. :
+                                       (component == 1) ? p[2] :
+                                                          -p[1],
+                                       (component == 0) ? -p[2] :
+                                       (component == 1) ? 0. :
+                                                          p[0],
+                                       (component == 0) ? p[1] :
+                                       (component == 1) ? -p[0] :
+                                                          0.}};
+
+    return modes[type];
+  }
+
+
+
+  template <typename Number>
+  void
+  set_elasticity_operator_nullspace(
+    Teuchos::ParameterList &             parameter_list,
+    std::unique_ptr<Epetra_MultiVector> &ptr_distributed_modes,
+    const Epetra_RowMatrix &             matrix,
+    const std::vector<LinearAlgebra::distributed::Vector<Number>> &modes)
+  {
+    using size_type = TrilinosWrappers::PreconditionAMG::size_type;
+    const Epetra_Map &  domain_map      = matrix.OperatorDomainMap();
+    constexpr size_type modes_dimension = 6; // hard-coded for linear elasticity
+
+    ptr_distributed_modes.reset(
+      new Epetra_MultiVector(domain_map, modes_dimension));
+    Assert(ptr_distributed_modes, ExcNotInitialized());
+    Epetra_MultiVector &distributed_modes = *ptr_distributed_modes;
+
+    const size_type global_size = TrilinosWrappers::n_global_rows(matrix);
+
+    Assert(global_size == static_cast<size_type>(
+                            TrilinosWrappers::global_length(distributed_modes)),
+           ExcDimensionMismatch(
+             global_size, TrilinosWrappers::global_length(distributed_modes)));
+
+    const size_type my_size = domain_map.NumMyElements();
+
+    // Reshape null space as a contiguous vector of doubles so that
+    // Trilinos can read from it.
+    [[maybe_unused]] const size_type expected_mode_size = global_size;
+    for (size_type d = 0; d < modes_dimension; ++d)
+      {
+        Assert(modes[d].size() == expected_mode_size,
+               ExcDimensionMismatch(modes[d].size(), expected_mode_size));
+        for (size_type row = 0; row < my_size; ++row)
+          {
+            const TrilinosWrappers::types::int_type mode_index =
+              TrilinosWrappers::global_index(domain_map, row);
+            distributed_modes[d][row] =
+              static_cast<double>(modes[d][mode_index]);
+          }
+      }
+
+    parameter_list.set("null space: type", "pre-computed");
+    parameter_list.set("null space: dimension", distributed_modes.NumVectors());
+    parameter_list.set("null space: vectors", distributed_modes.Values());
+  }
+
 } // namespace dealii::MGTools
