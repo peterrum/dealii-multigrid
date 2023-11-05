@@ -1150,13 +1150,9 @@ mg_solve(SolverControl &                              solver_control,
               typename ElasticityOperator<dim, 3, Number>::VectorType>>>(
             pmg_dof_handlers[pmg_max_level], *pmg, *transfer_pmg);
 
-          mg_coarse = std::make_unique<MGCoarseGridIterativeSolver<
+          mg_coarse = std::make_unique<MGCoarseGridApplyPreconditioner<
             VectorType,
-            SolverCG<VectorType>,
-            LevelMatrixType,
             std::remove_reference_t<decltype(*multigrid_preconditioner)>>>(
-            *coarse_grid_solver_pmg,
-            pmg_operators[pmg_max_level],
             *multigrid_preconditioner);
         }
       else
@@ -1290,6 +1286,68 @@ mg_solve(SolverControl &                              solver_control,
 #else
       AssertThrow(false, ExcNotImplemented());
 #endif
+    }
+  else if (mg_data.coarse_solver.type == "amg_elasticity")
+    {
+      Assert((std::is_same_v<
+               LevelMatrixType,
+               ElasticityOperator<3, 3, typename LevelMatrixType::value_type>>),
+             ExcNotImplemented());
+
+      Teuchos::ParameterList parameter_list;
+      ML_Epetra::SetDefaults("SA", parameter_list);
+      std::unique_ptr<Epetra_MultiVector> distributed_modes;
+
+      std::vector<LinearAlgebra::distributed::Vector<
+        typename LevelMatrixType::value_type>>
+        near_null_space(6);
+      for (unsigned int i = 0; i < near_null_space.size(); ++i)
+        {
+          near_null_space[i].reinit(
+            mg_matrices[min_level].get_vector_partitioner(), MPI_COMM_WORLD);
+          const MGTools::RigidBodyMotion<3> &rbm(i);
+          VectorTools::interpolate(mg_matrices[min_level].get_dof_handler(),
+                                   rbm,
+                                   near_null_space[i]);
+        }
+
+
+      MGTools::set_elasticity_operator_nullspace<
+        typename LevelMatrixType::value_type>(
+        parameter_list,
+        distributed_modes,
+        mg_matrices[min_level].get_trilinos_system_matrix().trilinos_matrix(),
+        near_null_space);
+
+      parameter_list.set("smoother: type",
+                         mg_data.coarse_solver.smoother_type.c_str());
+      parameter_list.set("coarse: type", "Amesos-KLU");
+      parameter_list.set("smoother: sweeps",
+                         static_cast<int>(
+                           mg_data.coarse_solver.smoother_sweeps));
+      parameter_list.set("cycle applications",
+                         static_cast<int>(mg_data.coarse_solver.n_cycles));
+      parameter_list.set("coarse: type", "Amesos-KLU");
+      parameter_list.set("smoother: sweeps", 1);
+      parameter_list.set("cycle applications", 1);
+      parameter_list.set("prec type", "MGV");
+      parameter_list.set("smoother: Chebyshev alpha", 10.);
+      parameter_list.set("smoother: ifpack overlap", 0);
+      parameter_list.set("aggregation: threshold", 1e-3);
+      parameter_list.set("ML output", 10);
+      parameter_list.set("coarse: max size", 2000);
+      parameter_list.set("repartition: enable", 1);
+      parameter_list.set("repartition: max min ratio", 1.3);
+      parameter_list.set("repartition: min per proc", 300);
+      parameter_list.set("repartition: partitioner", "Zoltan");
+      parameter_list.set("repartition: Zoltan dimensions", 3);
+
+      precondition_amg.initialize(
+        mg_matrices[min_level].get_trilinos_system_matrix(), parameter_list);
+      mg_coarse = std::make_unique<
+        MGCoarseGridApplyPreconditioner<VectorType,
+                                        TrilinosWrappers::PreconditionAMG>>(
+        precondition_amg);
     }
   else if (mg_data.coarse_solver.type == "amg_petsc")
     {
@@ -1903,13 +1961,27 @@ solve_with_global_coarsening(
         DoFTools::extract_locally_relevant_dofs(dof_handler,
                                                 locally_relevant_dofs);
         constraint.reinit(locally_relevant_dofs);
-        VectorTools::interpolate_boundary_values(
-          mapping,
-          dof_handler,
-          0,
-          Functions::ZeroFunction<dim, typename OperatorType::value_type>(
-            dof_handler_in.get_fe().n_components()),
-          constraint);
+        if (OPERATOR == 1)
+          {
+            // ElasticityOperator has 1 as Dirichlet_id
+            VectorTools::interpolate_boundary_values(
+              mapping,
+              dof_handler,
+              1,
+              Functions::ZeroFunction<dim, typename OperatorType::value_type>(
+                dof_handler.get_fe().n_components()),
+              constraint);
+          }
+        else
+          {
+            VectorTools::interpolate_boundary_values(
+              mapping,
+              dof_handler,
+              0,
+              Functions::ZeroFunction<dim, typename OperatorType::value_type>(
+                dof_handler_in.get_fe().n_components()),
+              constraint);
+          }
         DoFTools::make_hanging_node_constraints(dof_handler, constraint);
         constraint.close();
 
@@ -2804,7 +2876,7 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
     }
   else if ((std::find(geometries.cbegin(), geometries.cend(), geometry_type) !=
             std::end(geometries)) &&
-           (type == "HMG-NN" || type == "AMG"))
+           (type == "HMG-NN" || type == "AMG" || type == "PMG"))
     {
       // do nothing for non_nested test cases, fill the triangulations later
     }
@@ -2976,28 +3048,50 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
     }
   else
     {
-      // Two cases here : non - nested hierarchy, or nested ones used to compare
-      // with Global Coarsening
+      // Two cases here:
+      // - non - nested
+      // - Global Coarsening
       if (std::find(geometries.cbegin(), geometries.cend(), geometry_type) !=
           std::end(geometries))
         {
-          unsigned int max_n_levels = numbers::invalid_unsigned_int;
-          if constexpr (dim == 2)
-            max_n_levels = 5;
-          else if constexpr (dim == 3)
-            max_n_levels = (geometry_type == "fichera") ? 4 : 3;
+          if (type == "PMG")
+            {
+              if constexpr (dim == 3)
+                {
+                  std::string suffix = ".inp";
+                  GridIn<3>   grid_in;
+                  const auto  dummy_tria =
+                    std::make_shared<parallel::distributed::Triangulation<3>>(
+                      tria.get_communicator());
+                  grid_in.attach_triangulation(*dummy_tria);
+                  std::ifstream input_file(
+                    "../meshes/" + geometry_type + "/" + geometry_type + "_" +
+                    std::to_string(params.n_ref_global) + suffix);
+                  grid_in.read_abaqus(input_file);
+                  triangulations.push_back(dummy_tria);
+                }
+            }
           else
-            Assert(false, ExcInternalError());
+            {
+              unsigned int max_n_levels = numbers::invalid_unsigned_int;
+              if constexpr (dim == 2)
+                max_n_levels = 5;
+              else if constexpr (dim == 3)
+                max_n_levels = (geometry_type == "fichera") ? 4 : 3;
+              else
+                Assert(false, ExcInternalError());
 
-          // non-nested hierarchy
-          const auto &non_nested_triangulations =
-            MGTools::create_non_nested_sequence<dim>(geometry_type,
-                                                     n_ref_global, /*n_levels*/
-                                                     max_n_levels,
-                                                     tria.get_communicator());
+              // non-nested hierarchy
+              const auto &non_nested_triangulations =
+                MGTools::create_non_nested_sequence<dim>(
+                  geometry_type,
+                  n_ref_global, /*n_levels*/
+                  max_n_levels,
+                  tria.get_communicator());
 
-          for (const auto &tria : non_nested_triangulations)
-            triangulations.push_back(tria);
+              for (const auto &tria : non_nested_triangulations)
+                triangulations.push_back(tria);
+            }
         }
       else
         {
