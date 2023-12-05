@@ -3,6 +3,7 @@
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/mpi.h>
 #include <deal.II/base/mpi.templates.h>
+#include <deal.II/base/parameter_handler.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/timer.h>
 
@@ -69,7 +70,8 @@ public:
   {}
 
   double
-  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  value(dealii::Point<dim> const &p,
+        unsigned int const /*component*/ = 0) const override
   {
     double return_value = 0;
 
@@ -101,7 +103,8 @@ public:
   {}
 
   double
-  value(dealii::Point<dim> const &p, unsigned int const /*component*/ = 0) const
+  value(dealii::Point<dim> const &p,
+        unsigned int const /*component*/ = 0) const override
   {
     double const coef         = 1.0;
     double       return_value = 0;
@@ -1098,9 +1101,13 @@ mg_solve(SolverControl &                              solver_control,
                                         min_level,
                                         min_level + offset - 1);
 
+#if DEAL_II_VERSION_GTE(9, 5, 0)
+  if (!mg_transfer_intermediate.performs_global_coarsening())
+#else
   if constexpr (!std::is_same<
                   MGTransferTypeCoarse,
                   MGTransferGlobalCoarsening<dim, VectorType>>::value)
+#endif
     if (dof_fine.get_triangulation().has_hanging_nodes())
       mg_intermediate.set_edge_in_matrix(mg_interface);
 
@@ -1123,9 +1130,13 @@ mg_solve(SolverControl &                              solver_control,
                                 min_level + offset,
                                 max_level);
 
+#if DEAL_II_VERSION_GTE(9, 5, 0)
+  if (!mg_transfer_fine.performs_global_coarsening())
+#else
   if constexpr (!std::is_same<
                   MGTransferTypeFine,
                   MGTransferGlobalCoarsening<dim, VectorType>>::value)
+#endif
     if (dof_fine.get_triangulation().has_hanging_nodes())
       mg_fine.set_edge_in_matrix(mg_interface);
 
