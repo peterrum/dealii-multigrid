@@ -1101,7 +1101,7 @@ mg_solve(SolverControl &                              solver_control,
                                         min_level,
                                         min_level + offset - 1);
 
-#if DEAL_II_VERSION_GTE(9, 5, 0)
+#if DEAL_II_VERSION_GTE(9, 6, 0)
   if (!mg_transfer_intermediate.performs_global_coarsening())
 #else
   if constexpr (!std::is_same<
@@ -1130,7 +1130,7 @@ mg_solve(SolverControl &                              solver_control,
                                 min_level + offset,
                                 max_level);
 
-#if DEAL_II_VERSION_GTE(9, 5, 0)
+#if DEAL_II_VERSION_GTE(9, 6, 0)
   if (!mg_transfer_fine.performs_global_coarsening())
 #else
   if constexpr (!std::is_same<
