@@ -28,6 +28,13 @@ ADD_CUSTOM_TARGET(release
   COMMENT "Switch CMAKE_BUILD_TYPE to Release\nPlease call 'make' to build the release project"
 )
 
+FIND_LIBRARY(LIKWID likwid HINTS "$ENV{LIKWID_LIB}")
+IF(LIKWID)
+  MESSAGE("Configuration with LIKWID")
+ELSE()
+  MESSAGE("Configuration without LIKWID")
+ENDIF()
+
 # Set available operators
 set(VARIANTS_OP "LAPLACE;ELASTICITY")
 
@@ -45,6 +52,10 @@ foreach(VAR_OP ${VARIANTS_OP})
   DEAL_II_SETUP_TARGET(${executable_name})
   target_compile_definitions(${executable_name} PUBLIC
     -D${OPTION_OP_${VAR_OP}})
-endforeach()
 
-target_link_libraries(${executable_name} "examples")
+  IF(LIKWID)
+    TARGET_COMPILE_DEFINITIONS(${executable_name} PUBLIC LIKWID_PERFMON)
+    TARGET_INCLUDE_DIRECTORIES(${executable_name} PUBLIC $ENV{LIKWID_INCLUDE})
+    TARGET_LINK_LIBRARIES(${executable_name} ${LIKWID})
+  ENDIF()
+endforeach()

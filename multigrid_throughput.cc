@@ -58,6 +58,10 @@
 #include "include/operator.h"
 #include "include/scoped_timer.h"
 
+#ifdef LIKWID_PERFMON
+#  include <likwid.h>
+#endif
+
 using namespace dealii;
 
 static std::vector<std::string> geometries = {"l_shape",
@@ -1578,29 +1582,51 @@ mg_solve(SolverControl &                              solver_control,
   std::pair<double, std::chrono::time_point<std::chrono::system_clock>>
     non_nested_evaluation_pro, non_nested_evaluation_res;
 
-  const auto timer_evaluation_prolongation =
-    [&non_nested_evaluation_pro](const bool flag) {
-      if (flag)
+  const auto timer_evaluation_prolongation = [&non_nested_evaluation_pro](
+                                               const bool flag) {
+    if (flag)
+      {
+#ifdef LIKWID_PERFMON
+        LIKWID_MARKER_START("prolongation_cell_loop");
+#endif
         non_nested_evaluation_pro.second = std::chrono::system_clock::now();
-      else
+      }
+    else
+      {
         non_nested_evaluation_pro.first +=
           std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::system_clock::now() - non_nested_evaluation_pro.second)
             .count() /
           1e9;
-    };
 
-  const auto timer_evaluation_restriction =
-    [&non_nested_evaluation_res](const bool flag) {
-      if (flag)
+#ifdef LIKWID_PERFMON
+        LIKWID_MARKER_STOP("prolongation_cell_loop");
+#endif
+      }
+  };
+
+  const auto timer_evaluation_restriction = [&non_nested_evaluation_res](
+                                              const bool flag) {
+    if (flag)
+      {
+#ifdef LIKWID_PERFMON
+        LIKWID_MARKER_START("restriction_cell_loop");
+#endif
         non_nested_evaluation_res.second = std::chrono::system_clock::now();
-      else
+      }
+    else
+      {
         non_nested_evaluation_res.first +=
           std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::system_clock::now() - non_nested_evaluation_res.second)
             .count() /
           1e9;
-    };
+#ifdef LIKWID_PERFMON
+        LIKWID_MARKER_STOP("restriction_cell_loop");
+#endif
+      }
+  };
+
   if (twolevels.n_levels() > 1)
     {
       for (unsigned int l = twolevels.min_level(); l < twolevels.max_level();
@@ -3418,6 +3444,11 @@ main(int argc, char **argv)
     {
       dealii::Utilities::MPI::MPI_InitFinalize mpi(argc, argv, 1);
 
+#ifdef LIKWID_PERFMON
+      LIKWID_MARKER_INIT;
+      LIKWID_MARKER_THREADINIT;
+#endif
+
       const MPI_Comm             comm = MPI_COMM_WORLD;
       dealii::ConditionalOStream pcout(
         std::cout, dealii::Utilities::MPI::this_mpi_process(comm) == 0);
@@ -3502,6 +3533,10 @@ main(int argc, char **argv)
                 table.write_text(pcout.get_stream());
             }
         }
+
+#ifdef LIKWID_PERFMON
+      LIKWID_MARKER_CLOSE;
+#endif
     }
   catch (std::exception &exc)
     {
