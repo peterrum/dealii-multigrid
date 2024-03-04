@@ -1289,65 +1289,70 @@ mg_solve(SolverControl &                              solver_control,
     }
   else if (mg_data.coarse_solver.type == "amg_elasticity")
     {
-      Assert((std::is_same_v<
-               LevelMatrixType,
-               ElasticityOperator<3, 3, typename LevelMatrixType::value_type>>),
-             ExcNotImplemented());
-
-      Teuchos::ParameterList parameter_list;
-      ML_Epetra::SetDefaults("SA", parameter_list);
-      std::unique_ptr<Epetra_MultiVector> distributed_modes;
-
-      std::vector<LinearAlgebra::distributed::Vector<
-        typename LevelMatrixType::value_type>>
-        near_null_space(6);
-      for (unsigned int i = 0; i < near_null_space.size(); ++i)
+      if constexpr (
+        std::is_same_v<
+          LevelMatrixType,
+          ElasticityOperator<3, 3, typename LevelMatrixType::value_type>>)
         {
-          near_null_space[i].reinit(
-            mg_matrices[min_level].get_vector_partitioner(), MPI_COMM_WORLD);
-          const MGTools::RigidBodyMotion<3> &rbm(i);
-          VectorTools::interpolate(mg_matrices[min_level].get_dof_handler(),
-                                   rbm,
-                                   near_null_space[i]);
+          Teuchos::ParameterList parameter_list;
+          ML_Epetra::SetDefaults("SA", parameter_list);
+          std::unique_ptr<Epetra_MultiVector> distributed_modes;
+
+          std::vector<LinearAlgebra::distributed::Vector<
+            typename LevelMatrixType::value_type>>
+            near_null_space(6);
+          for (unsigned int i = 0; i < near_null_space.size(); ++i)
+            {
+              near_null_space[i].reinit(
+                mg_matrices[min_level].get_vector_partitioner(),
+                MPI_COMM_WORLD);
+              const MGTools::RigidBodyMotion<3> &rbm(i);
+              VectorTools::interpolate(mg_matrices[min_level].get_dof_handler(),
+                                       rbm,
+                                       near_null_space[i]);
+            }
+
+
+          MGTools::set_elasticity_operator_nullspace<
+            typename LevelMatrixType::value_type>(
+            parameter_list,
+            distributed_modes,
+            mg_matrices[min_level]
+              .get_trilinos_system_matrix()
+              .trilinos_matrix(),
+            near_null_space);
+
+          parameter_list.set("smoother: type",
+                             mg_data.coarse_solver.smoother_type.c_str());
+          parameter_list.set("coarse: type", "Amesos-KLU");
+          parameter_list.set("smoother: sweeps",
+                             static_cast<int>(
+                               mg_data.coarse_solver.smoother_sweeps));
+          parameter_list.set("cycle applications",
+                             static_cast<int>(mg_data.coarse_solver.n_cycles));
+          parameter_list.set("coarse: type", "Amesos-KLU");
+          parameter_list.set("smoother: sweeps", 1);
+          parameter_list.set("cycle applications", 1);
+          parameter_list.set("prec type", "MGV");
+          parameter_list.set("smoother: Chebyshev alpha", 10.);
+          parameter_list.set("smoother: ifpack overlap", 0);
+          parameter_list.set("aggregation: threshold", 1e-3);
+          parameter_list.set("ML output", 10);
+          parameter_list.set("coarse: max size", 2000);
+          parameter_list.set("repartition: enable", 1);
+          parameter_list.set("repartition: max min ratio", 1.3);
+          parameter_list.set("repartition: min per proc", 300);
+          parameter_list.set("repartition: partitioner", "Zoltan");
+          parameter_list.set("repartition: Zoltan dimensions", 3);
+
+          precondition_amg.initialize(
+            mg_matrices[min_level].get_trilinos_system_matrix(),
+            parameter_list);
+          mg_coarse = std::make_unique<
+            MGCoarseGridApplyPreconditioner<VectorType,
+                                            TrilinosWrappers::PreconditionAMG>>(
+            precondition_amg);
         }
-
-
-      MGTools::set_elasticity_operator_nullspace<
-        typename LevelMatrixType::value_type>(
-        parameter_list,
-        distributed_modes,
-        mg_matrices[min_level].get_trilinos_system_matrix().trilinos_matrix(),
-        near_null_space);
-
-      parameter_list.set("smoother: type",
-                         mg_data.coarse_solver.smoother_type.c_str());
-      parameter_list.set("coarse: type", "Amesos-KLU");
-      parameter_list.set("smoother: sweeps",
-                         static_cast<int>(
-                           mg_data.coarse_solver.smoother_sweeps));
-      parameter_list.set("cycle applications",
-                         static_cast<int>(mg_data.coarse_solver.n_cycles));
-      parameter_list.set("coarse: type", "Amesos-KLU");
-      parameter_list.set("smoother: sweeps", 1);
-      parameter_list.set("cycle applications", 1);
-      parameter_list.set("prec type", "MGV");
-      parameter_list.set("smoother: Chebyshev alpha", 10.);
-      parameter_list.set("smoother: ifpack overlap", 0);
-      parameter_list.set("aggregation: threshold", 1e-3);
-      parameter_list.set("ML output", 10);
-      parameter_list.set("coarse: max size", 2000);
-      parameter_list.set("repartition: enable", 1);
-      parameter_list.set("repartition: max min ratio", 1.3);
-      parameter_list.set("repartition: min per proc", 300);
-      parameter_list.set("repartition: partitioner", "Zoltan");
-      parameter_list.set("repartition: Zoltan dimensions", 3);
-
-      precondition_amg.initialize(
-        mg_matrices[min_level].get_trilinos_system_matrix(), parameter_list);
-      mg_coarse = std::make_unique<
-        MGCoarseGridApplyPreconditioner<VectorType,
-                                        TrilinosWrappers::PreconditionAMG>>(
-        precondition_amg);
     }
   else if (mg_data.coarse_solver.type == "amg_petsc")
     {
@@ -1740,6 +1745,31 @@ mg_solve(SolverControl &                              solver_control,
       mg_times_incl_min.print_formatted(
         std::cout, 10, false, 16, "0.0000000000");
       std::cout << std::endl;
+      {
+        double sum = 0.;
+        for (size_t l = 0; l < max_level - min_level + 1; ++l)
+          {
+            for (size_t i = 0; i <= 7; i++)
+              {
+                sum += mg_times_min[l][1 + i];
+              }
+            std::cout << "Min exclusive time on level " + std::to_string(l)
+                      << "= " << sum << std::endl;
+            sum = 0.;
+          }
+
+        sum = 0.;
+        for (size_t l = 0; l < max_level - min_level + 1; ++l)
+          {
+            for (size_t i = 0; i <= 7; i++)
+              {
+                sum += mg_times_max[l][1 + i];
+              }
+            std::cout << "Max exclusive time on level " + std::to_string(l)
+                      << "= " << sum << std::endl;
+            sum = 0.;
+          }
+      }
 
       std::cout << "MAX-INCL:" << std::endl;
       mg_times_incl_max.print_formatted(
@@ -1780,6 +1810,17 @@ mg_solve(SolverControl &                              solver_control,
   table.add_value("time_pro_evaluation",
                   non_nested_evaluation_pro.first / solver_control.last_step());
   table.set_scientific("time_pro_evaluation", true);
+
+  // Add throughput for restriction and prolongation
+  table.add_value("throughput_restriction",
+                  src.size() * solver_control.last_step() /
+                    non_nested_evaluation_res.first);
+  table.set_scientific("throughput_restriction", true);
+  table.add_value("throughput_prolongation",
+                  src.size() * solver_control.last_step() /
+                    non_nested_evaluation_pro.first);
+  table.set_scientific("throughput_prolongation", true);
+
 
   monitor("mg_solve::5");
 }
@@ -2180,6 +2221,10 @@ solve_with_global_coarsening_non_nested(
             data.rtree_level = 3;    // k=3,level=3
           }
       }
+    else
+      {
+        data.enforce_all_points_found = false;
+      }
 
     monitor("solve_with_global_coarsening_non_nested::2");
 
@@ -2307,7 +2352,7 @@ solve_with_global_coarsening_non_nested(
     std::unique_ptr<MGLevelObject<DoFHandler<dim>>>           pmg_dof_handlers;
     std::unique_ptr<PMG_CoarseGridProxy<dim, Number, OperatorType>> pmg_proxy;
 
-    if constexpr (OPERATOR == 1)
+    if constexpr (OPERATOR == 1 && dim == 3)
       {
         if (mg_data.coarse_solver.type == "PMG")
           { // Setup pMG
@@ -2772,6 +2817,8 @@ solve_with_amg(const std::string &        type,
   table.add_value("time_to_global", 0);
   table.add_value("time_res_evaluation", 0);
   table.add_value("time_pro_evaluation", 0);
+  table.add_value("throughput_restriction", 0);
+  table.add_value("throughput_prolongation", 0);
   table.add_value("workload_eff", 0);
   table.add_value("workload_path_max", 0);
   table.add_value("vertical_eff", 0);
@@ -2869,9 +2916,14 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
     GridGenerator::create_circle(tria, n_ref_global);
   else if (geometry_type == "annulus")
     GridGenerator::create_annulus(tria, n_ref_global);
-  else if (geometry_type == "hypercube")
+  else if (geometry_type == "hyper_cube")
     {
       GridGenerator::hyper_cube(tria, -1.0, +1.0);
+      tria.refine_global(n_ref_global);
+    }
+  else if (geometry_type == "hyper_ball")
+    {
+      GridGenerator::hyper_ball(tria);
       tria.refine_global(n_ref_global);
     }
   else if ((std::find(geometries.cbegin(), geometries.cend(), geometry_type) !=
@@ -3075,9 +3127,9 @@ run(OperatorType &op, const RunParameters &params, ConvergenceTable &table)
             {
               unsigned int max_n_levels = numbers::invalid_unsigned_int;
               if constexpr (dim == 2)
-                max_n_levels = 5;
+                max_n_levels = 7; //
               else if constexpr (dim == 3)
-                max_n_levels = (geometry_type == "fichera") ? 4 : 3;
+                max_n_levels = (geometry_type == "fichera") ? 5 : 3; // 4:3;
               else
                 Assert(false, ExcInternalError());
 
