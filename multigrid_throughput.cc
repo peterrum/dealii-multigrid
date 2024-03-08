@@ -1055,7 +1055,7 @@ mg_solve(SolverControl &                              solver_control,
                   near_null_space[i].reinit(
                     pmg_operators[pmg_min_level].get_vector_partitioner(),
                     sub_comm);
-                  const MGTools::RigidBodyMotion<dim> &rbm(i);
+                  const MGTools::RigidBodyMotion<dim> rbm(i);
                   VectorTools::interpolate(pmg_dof_handlers[pmg_min_level],
                                            rbm,
                                            near_null_space[i]);
@@ -1310,7 +1310,7 @@ mg_solve(SolverControl &                              solver_control,
               near_null_space[i].reinit(
                 mg_matrices[min_level].get_vector_partitioner(),
                 MPI_COMM_WORLD);
-              const MGTools::RigidBodyMotion<3> &rbm(i);
+              const MGTools::RigidBodyMotion<3> rbm(i);
               VectorTools::interpolate(mg_matrices[min_level].get_dof_handler(),
                                        rbm,
                                        near_null_space[i]);
@@ -2755,7 +2755,7 @@ solve_with_amg(const std::string &        type,
                 {
                   near_null_space[i].reinit(op.get_vector_partitioner(),
                                             MPI_COMM_WORLD);
-                  const MGTools::RigidBodyMotion<3> &rbm(i);
+                  const MGTools::RigidBodyMotion<3> rbm(i);
                   VectorTools::interpolate(op.get_dof_handler(),
                                            rbm,
                                            near_null_space[i]);
