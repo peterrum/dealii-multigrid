@@ -2,6 +2,9 @@
 #include <deal.II/base/mpi_compute_index_owner_internal.h>
 
 #include <deal.II/grid/cell_id_translator.h>
+#include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_tools.h>
+#include <deal.II/grid/grid_tools_cache.h>
 
 namespace dealii::MGTools
 {
@@ -82,8 +85,13 @@ namespace dealii::MGTools
   std::tuple<std::vector<types::global_dof_index>,
              std::vector<types::global_dof_index>,
              MPI_Comm>
-  vertical_communication_cost(const Triangulation<dim, spacedim> &tria)
+  vertical_communication_cost(const Triangulation<dim, spacedim> &tria,
+                              const bool                          nested = true)
   {
+    (void)nested;
+    Assert(nested == true,
+           ExcMessage(
+             "This function is meant to be called by nested hierarchies."));
     const unsigned int n_global_levels = tria.n_global_levels();
 
     std::vector<types::global_dof_index> cells_local(n_global_levels);
@@ -118,74 +126,141 @@ namespace dealii::MGTools
              MPI_Comm>
   vertical_communication_cost(
     const std::vector<std::shared_ptr<const Triangulation<dim, spacedim>>>
-      &trias)
+      &        trias,
+    const bool nested = true)
   {
+    const MPI_Comm     communicator    = trias.back()->get_communicator();
     const unsigned int n_global_levels = trias.size();
-
     std::vector<types::global_dof_index> cells_local(n_global_levels);
     std::vector<types::global_dof_index> cells_remote(n_global_levels);
-
-    const MPI_Comm communicator = trias.back()->get_communicator();
-
     const unsigned int my_rank = Utilities::MPI::this_mpi_process(communicator);
-
-    for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
+    if (nested)
       {
-        const auto &tria_coarse = *trias[lvl];
-        const auto &tria_fine   = *trias[lvl + 1];
+        for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
+          {
+            const auto &tria_coarse = *trias[lvl];
+            const auto &tria_fine   = *trias[lvl + 1];
 
-        const unsigned int n_coarse_cells  = tria_fine.n_global_coarse_cells();
-        const unsigned int n_global_levels = tria_fine.n_global_levels();
+            const unsigned int n_coarse_cells =
+              tria_fine.n_global_coarse_cells();
+            const unsigned int n_global_levels = tria_fine.n_global_levels();
 
-        const dealii::internal::CellIDTranslator<dim> cell_id_translator(
-          n_coarse_cells, n_global_levels);
+            const dealii::internal::CellIDTranslator<dim> cell_id_translator(
+              n_coarse_cells, n_global_levels);
 
-        IndexSet is_fine_owned(cell_id_translator.size());
-        IndexSet is_fine_required(cell_id_translator.size());
+            IndexSet is_fine_owned(cell_id_translator.size());
+            IndexSet is_fine_required(cell_id_translator.size());
 
-        for (const auto &cell : tria_fine.active_cell_iterators())
-          if (!cell->is_artificial() && cell->is_locally_owned())
-            is_fine_owned.add_index(cell_id_translator.translate(cell));
+            for (const auto &cell : tria_fine.active_cell_iterators())
+              if (!cell->is_artificial() && cell->is_locally_owned())
+                is_fine_owned.add_index(cell_id_translator.translate(cell));
 
-        for (const auto &cell : tria_coarse.active_cell_iterators())
-          if (!cell->is_artificial() && cell->is_locally_owned())
-            {
-              if (cell->level() + 1u == tria_fine.n_global_levels())
-                continue;
+            for (const auto &cell : tria_coarse.active_cell_iterators())
+              if (!cell->is_artificial() && cell->is_locally_owned())
+                {
+                  if (cell->level() + 1u == tria_fine.n_global_levels())
+                    continue;
 
-              for (unsigned int i = 0;
-                   i < GeometryInfo<dim>::max_children_per_cell;
-                   ++i)
-                is_fine_required.add_index(
-                  cell_id_translator.translate(cell, i));
-            }
+                  for (unsigned int i = 0;
+                       i < GeometryInfo<dim>::max_children_per_cell;
+                       ++i)
+                    is_fine_required.add_index(
+                      cell_id_translator.translate(cell, i));
+                }
 
 
-        std::vector<unsigned int> is_fine_required_ranks(
-          is_fine_required.n_elements());
+            std::vector<unsigned int> is_fine_required_ranks(
+              is_fine_required.n_elements());
 
-        Utilities::MPI::internal::ComputeIndexOwner::ConsensusAlgorithmsPayload
-          process(is_fine_owned,
-                  is_fine_required,
-                  communicator,
-                  is_fine_required_ranks,
-                  false);
+            Utilities::MPI::internal::ComputeIndexOwner::
+              ConsensusAlgorithmsPayload process(is_fine_owned,
+                                                 is_fine_required,
+                                                 communicator,
+                                                 is_fine_required_ranks,
+                                                 false);
 
-        Utilities::MPI::ConsensusAlgorithms::Selector<
-          std::vector<
-            std::pair<types::global_cell_index, types::global_cell_index>>,
-          std::vector<unsigned int>>
-          consensus_algorithm;
-        consensus_algorithm.run(process, communicator);
+            Utilities::MPI::ConsensusAlgorithms::Selector<
+              std::vector<
+                std::pair<types::global_cell_index, types::global_cell_index>>,
+              std::vector<unsigned int>>
+              consensus_algorithm;
+            consensus_algorithm.run(process, communicator);
 
-        for (unsigned i = 0; i < is_fine_required.n_elements(); ++i)
-          if (is_fine_required_ranks[i] == my_rank)
-            ++cells_local[lvl + 1];
-          else if (is_fine_required_ranks[i] != numbers::invalid_unsigned_int)
-            ++cells_remote[lvl + 1];
+            for (unsigned i = 0; i < is_fine_required.n_elements(); ++i)
+              if (is_fine_required_ranks[i] == my_rank)
+                ++cells_local[lvl + 1];
+              else if (is_fine_required_ranks[i] !=
+                       numbers::invalid_unsigned_int)
+                ++cells_remote[lvl + 1];
+          }
+
+        return {cells_local, cells_remote, trias.back()->get_communicator()};
       }
+    else
+      {
+        // In this case, instead of cells we are checking for points, so the
+        // names used in the return statement are a bit misleading.
+        static constexpr double tol = 1e-14;
 
-    return {cells_local, cells_remote, trias.back()->get_communicator()};
+        // Use distributed_compute_point_locations() for consecutive levels
+        for (unsigned int lvl = 0; lvl < n_global_levels - 1; ++lvl)
+          {
+            const auto &tria_coarse = *trias[lvl];
+            const auto &tria_fine   = *trias[lvl + 1];
+
+            GridTools::Cache<dim>             cache_coarse(tria_coarse);
+            const MappingQ1<dim> &            mapping{};
+            IteratorFilters::LocallyOwnedCell locally_owned_cell_predicate;
+
+            std::vector<BoundingBox<dim>> local_bbox =
+              GridTools::compute_mesh_predicate_bounding_box(
+                tria_coarse,
+                std::function<bool(
+                  const typename Triangulation<dim>::active_cell_iterator &)>(
+                  locally_owned_cell_predicate),
+                0 /*refinement_level=0, triangulations are all independent*/,
+                false,
+                4);
+            std::vector<std::vector<BoundingBox<dim>>> global_bboxes;
+            global_bboxes =
+              Utilities::MPI::all_gather(communicator, local_bbox);
+
+            // instead of computing the real location of every support point,
+            // just take the vertices of each cell as locally owned points. This
+            // should be enough to have a good indication.
+            std::vector<Point<dim>> locally_owned_points;
+            for (const auto &cell : tria_fine.active_cell_iterators())
+              if (cell->is_locally_owned())
+                {
+                  // Get vertices and push them back
+                  const auto &vertices = mapping.get_vertices(cell);
+                  for (const auto &p : vertices)
+                    locally_owned_points.emplace_back(p);
+                }
+
+            const auto &output_tuple =
+              GridTools::distributed_compute_point_locations(
+                cache_coarse, locally_owned_points, global_bboxes, tol);
+
+            const auto &maps   = std::get<2>(output_tuple);
+            const auto &points = std::get<3>(output_tuple);
+            const auto &owners = std::get<4>(output_tuple);
+            for (unsigned int i = 0; i < points.size(); ++i)
+              {
+                for (unsigned int j = 0; j < maps[i].size(); ++j)
+                  {
+                    // if ((locally_owned_points[maps[i][j]] - points[i][j])
+                    //       .norm() < tol)
+                    if (owners[i][j] == my_rank)
+                      ++cells_local[lvl + 1];
+                    else
+                      ++cells_remote[lvl + 1];
+                  }
+              }
+          }
+
+        return {cells_local, cells_remote, trias.back()->get_communicator()};
+      }
   }
 
   template <int dim, int spacedim>
@@ -266,7 +341,7 @@ namespace dealii::MGTools
 
   template <typename T>
   std::vector<std::pair<std::string, double>>
-  print_multigrid_statistics(const T &trias)
+  print_multigrid_statistics(const T &trias, const bool nested = true)
   {
     std::vector<std::pair<std::string, double>> result;
 
@@ -340,7 +415,7 @@ namespace dealii::MGTools
     // vertical communication
     {
       const auto [cells_local, cells_remote, comm] =
-        vertical_communication_cost(trias);
+        vertical_communication_cost(trias, nested);
 
       std::vector<types::global_dof_index> cells_local_min(cells_local.size());
       std::vector<types::global_dof_index> cells_local_max(cells_local.size());
@@ -510,4 +585,204 @@ namespace dealii::MGTools
     }
     return result;
   }
+
+  // Number of levels is hardcoded here, as hierarchy of grids is given a
+  // priori.
+  template <int dim>
+  std::vector<std::shared_ptr<Triangulation<dim>>>
+  create_non_nested_sequence(const std::string &geometry_type,
+                             const unsigned int n_levels,
+                             const unsigned int max_n_levels,
+                             const MPI_Comm &   mpi_comm)
+  {
+    Assert(n_levels <= max_n_levels,
+           ExcMessage("Number of given levels " + std::to_string(n_levels) +
+                      " exceeds the number of possible ones, which is " +
+                      std::to_string(max_n_levels)));
+    (void)max_n_levels; // just to suppress warning
+
+    std::vector<std::shared_ptr<Triangulation<dim>>> trias(n_levels + 1);
+
+#ifdef SIMPLEX
+    Assert(dim == 3, ExcImpossibleInDim(dim));
+    Assert(geometry_type == "wrench_tetrahedral",
+           ExcMessage("The given geometry, " + geometry_type +
+                      ", is not available for dim = " + std::to_string(dim) +
+                      " with simplices."));
+    std::string suffix = ".msh";
+
+    for (unsigned int l = 0; l < trias.size(); ++l)
+      {
+        trias[l] =
+          std::make_shared<parallel::fullydistributed::Triangulation<dim>>(
+            mpi_comm);
+
+        std::ifstream input_file("../meshes/" + geometry_type + "/" +
+                                 geometry_type + "_" + std::to_string(l) +
+                                 suffix);
+
+        // create description
+        const TriangulationDescription::Description<dim, dim> description =
+          TriangulationDescription::Utilities::
+            create_description_from_triangulation_in_groups<dim, dim>(
+              [&](auto &tria_base) {
+                GridIn<dim> grid_in;
+                grid_in.attach_triangulation(tria_base);
+                grid_in.read_msh(input_file);
+              },
+              [&](auto &tria_base,
+                  const MPI_Comm /*mpi_comm*/,
+                  const unsigned int /*group_size*/) {
+                GridTools::partition_triangulation(
+                  Utilities::MPI::n_mpi_processes(mpi_comm), tria_base);
+              },
+              mpi_comm,
+              Utilities::MPI::n_mpi_processes(mpi_comm));
+
+        // create triangulation
+        trias[l]->create_triangulation(description);
+      }
+    return trias;
+#else
+    GridIn<dim> grid_in;
+    std::string suffix;
+    if constexpr (dim == 2)
+      {
+        Assert(geometry_type == "l_shape",
+               ExcMessage(
+                 "The given geometry, " + geometry_type +
+                 ", is not available for dim = " + std::to_string(dim)));
+        suffix = ".msh"; // gmsh
+      }
+    else if constexpr (dim == 3)
+      {
+        Assert(geometry_type == "fichera" || geometry_type == "knuckle" ||
+                 geometry_type == "wrench" || geometry_type == "piston",
+               ExcMessage(
+                 "The given geometry, " + geometry_type +
+                 ", is not available for dim = " + std::to_string(dim)));
+        suffix = ".inp"; // abaqus
+      }
+    else
+      {
+        Assert(false, ExcImpossibleInDim());
+      }
+
+    for (unsigned int l = 0; l < trias.size(); ++l)
+      {
+        trias[l] =
+          std::make_shared<parallel::distributed::Triangulation<dim>>(mpi_comm);
+        grid_in.attach_triangulation(*trias[l]);
+
+        std::ifstream input_file("../meshes/" + geometry_type + "/" +
+                                 geometry_type + "_" + std::to_string(l) +
+                                 suffix);
+        if constexpr (dim == 2)
+          grid_in.read_msh(input_file);
+        else
+          grid_in.read_abaqus(input_file);
+      }
+    return trias;
+#endif
+  }
+
+
+  /**
+   * Definition of the 6 Rigid body motions for 3D linear elasticity.
+   */
+  template <int dim>
+  class RigidBodyMotion : public Function<dim>
+  {
+  public:
+    RigidBodyMotion(const unsigned int type_);
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component) const override;
+
+  private:
+    const unsigned int type;
+  };
+
+
+  template <int dim>
+  RigidBodyMotion<dim>::RigidBodyMotion(const unsigned int _type)
+    : Function<dim>(dim)
+    , type(_type)
+  {
+    Assert(dim == 3, ExcNotImplemented());
+    Assert(type <= 5, ExcNotImplemented());
+  }
+
+
+
+  template <int dim>
+  double
+  RigidBodyMotion<dim>::value(const Point<dim> & p,
+                              const unsigned int component) const
+  {
+    const std::array<double, 6> modes{{static_cast<double>(component == 0),
+                                       static_cast<double>(component == 1),
+                                       static_cast<double>(component == 2),
+                                       (component == 0) ? 0. :
+                                       (component == 1) ? p[2] :
+                                                          -p[1],
+                                       (component == 0) ? -p[2] :
+                                       (component == 1) ? 0. :
+                                                          p[0],
+                                       (component == 0) ? p[1] :
+                                       (component == 1) ? -p[0] :
+                                                          0.}};
+
+    return modes[type];
+  }
+
+
+
+  template <typename Number>
+  void
+  set_elasticity_operator_nullspace(
+    Teuchos::ParameterList &             parameter_list,
+    std::unique_ptr<Epetra_MultiVector> &ptr_distributed_modes,
+    const Epetra_RowMatrix &             matrix,
+    const std::vector<LinearAlgebra::distributed::Vector<Number>> &modes)
+  {
+    using size_type = TrilinosWrappers::PreconditionAMG::size_type;
+    const Epetra_Map &  domain_map      = matrix.OperatorDomainMap();
+    constexpr size_type modes_dimension = 6; // hard-coded for linear elasticity
+
+    ptr_distributed_modes.reset(
+      new Epetra_MultiVector(domain_map, modes_dimension));
+    Assert(ptr_distributed_modes, ExcNotInitialized());
+    Epetra_MultiVector &distributed_modes = *ptr_distributed_modes;
+
+    const size_type global_size = TrilinosWrappers::n_global_rows(matrix);
+
+    Assert(global_size == static_cast<size_type>(
+                            TrilinosWrappers::global_length(distributed_modes)),
+           ExcDimensionMismatch(
+             global_size, TrilinosWrappers::global_length(distributed_modes)));
+
+    const size_type my_size = domain_map.NumMyElements();
+
+    // Reshape null space as a contiguous vector of doubles so that
+    // Trilinos can read from it.
+    [[maybe_unused]] const size_type expected_mode_size = global_size;
+    for (size_type d = 0; d < modes_dimension; ++d)
+      {
+        Assert(modes[d].size() == expected_mode_size,
+               ExcDimensionMismatch(modes[d].size(), expected_mode_size));
+        for (size_type row = 0; row < my_size; ++row)
+          {
+            const TrilinosWrappers::types::int_type mode_index =
+              TrilinosWrappers::global_index(domain_map, row);
+            distributed_modes[d][row] =
+              static_cast<double>(modes[d][mode_index]);
+          }
+      }
+
+    parameter_list.set("null space: type", "pre-computed");
+    parameter_list.set("null space: dimension", distributed_modes.NumVectors());
+    parameter_list.set("null space: vectors", distributed_modes.Values());
+  }
+
 } // namespace dealii::MGTools
